@@ -14,13 +14,7 @@
 
 import process from 'node:process';
 
-const requireEnv = (key) => {
-  const value = process.env[key];
-  if (value === undefined) {
-    throw new Error(`Missing required env: ${key}`);
-  }
-  return value;
-};
+import { requireEnv } from './env.mjs';
 
 const repo = requireEnv('REPO');
 const prNumber = requireEnv('PR_NUMBER');

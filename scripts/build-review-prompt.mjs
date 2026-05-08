@@ -17,6 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
+import { requireEnv } from './env.mjs';
+
 /**
  * Resolve the instruction dependency graph from instructions/index.json.
  * @param {string} actionPath
@@ -48,14 +50,6 @@ function resolveInstructions(actionPath, requested) {
   }
   return order;
 }
-
-const requireEnv = (key) => {
-  const value = process.env[key];
-  if (value === undefined) {
-    throw new Error(`Missing required env: ${key}`);
-  }
-  return value;
-};
 
 const actionPath = requireEnv('ACTION_PATH');
 const instructions = process.env.INSTRUCTIONS ?? 'default';
