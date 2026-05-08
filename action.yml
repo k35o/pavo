@@ -133,7 +133,7 @@ runs:
         bot_name: ${{ steps.bot.outputs.name }}
         prompt: ${{ steps.review-prompt.outputs.prompt }}
         claude_args: |
-          --model opus
+          --model sonnet
           --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
 
     # ===== conversation path =====
@@ -197,5 +197,5 @@ runs:
         bot_name: ${{ steps.bot.outputs.name }}
         prompt: ${{ steps.convo-prompt.outputs.prompt }}
         claude_args: |
-          --model opus
+          --model sonnet
           --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"

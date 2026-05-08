@@ -108,36 +108,43 @@ sections.push(
 sections.push(
   '## レビューの投稿方法\n\n' +
     'PR レビューは GitHub の **Pull Request Review** として 1 件にまとめて投稿する。\n\n' +
-    '**最重要ルール: `gh api ... /reviews` は 1 PR につき 1 回しか呼ばない。** ' +
-    '複数回呼ぶと UI に独立した Review が並んで台無しになる。' +
-    '全 inline 指摘とサマリ本文は **必ず 1 つの payload にまとめる**。\n\n' +
-    '**手順:**\n' +
-    '1. diff を読み、対象行ごとの指摘（バグ・命名・設計・パフォーマンス・テスト不足・改善提案）を全部洗い出す\n' +
-    '2. 各指摘を `{ path, line, side, body }` の形で集める（変更行は `"RIGHT"`、削除行を指すときだけ `"LEFT"`）\n' +
-    '3. PR 全体のサマリ本文を必ず 1 つ書く（指摘がない場合も「確認した観点」+「特に問題なし」を 1 行）\n' +
-    '4. すべての指摘とサマリを 1 つの payload にまとめて `gh api` を **1 回だけ** 呼ぶ:\n\n' +
+    '### 鉄則: `gh api ... /reviews` の呼び出しは review session で 1 回だけ\n\n' +
+    'inline 指摘が N 件あっても、N 回でも N+1 回でもなく、**1 回**呼ぶ。' +
+    '複数回呼ぶと PR の timeline に独立した Review が並んで UI が台無しになる。' +
+    '`gh api` を呼ぶのは review session の **最後の操作**であり、それ以前に呼んではいけない。\n\n' +
+    '### 投稿パターン（厳守）\n\n' +
+    '**フェーズ 1 (収集):** diff を読み、対象行ごとの指摘を全部頭の中で集める。' +
+    '各指摘は `{ path, line, side, body }` として scratchpad に保持する。' +
+    '**この段階では gh api を呼ばない。**\n\n' +
+    '**フェーズ 2 (サマリ作成):** 収集した指摘を踏まえて PR 全体のサマリ本文を 1 つ書く。' +
+    '指摘 0 件のときも「特に問題なし + 確認した観点」を 1 行で必ず書く。' +
+    '**この段階では gh api を呼ばない。**\n\n' +
+    '**フェーズ 3 (一括投稿):** フェーズ 1 と 2 の結果を 1 つの JSON payload にまとめて `gh api` を 1 回だけ呼ぶ:\n\n' +
     '```bash\n' +
     `gh api --method POST /repos/${repo}/pulls/${prNumber}/reviews --input - <<'JSON'\n` +
     '{\n' +
-    '  "body": "<必ず埋める。空文字 \\"\\" 禁止>",\n' +
+    '  "body": "<フェーズ 2 のサマリ。空文字 \\"\\" 禁止>",\n' +
     '  "event": "COMMENT",\n' +
     '  "comments": [\n' +
     '    {"path": "...", "line": 42, "side": "RIGHT", "body": "🔵 ..."},\n' +
-    '    {"path": "...", "line": 88, "side": "RIGHT", "body": "🟡 ..."}\n' +
+    '    {"path": "...", "line": 88, "side": "RIGHT", "body": "🟡 ..."},\n' +
+    '    {"path": "...", "line": 130, "side": "RIGHT", "body": "🔴 ..."}\n' +
     '  ]\n' +
     '}\n' +
     'JSON\n' +
     '```\n\n' +
-    '**禁止事項:**\n' +
-    '- `gh api ... /reviews` を 2 回以上呼ぶ（1 件ずつ別 Review として投稿しない）\n' +
-    '- `body` を空文字で送る（必ずサマリを書く）\n' +
-    '- `gh pr comment` や `mcp__github_inline_comment__create_inline_comment` を使う（Review にぶら下げる UI を壊す）\n' +
-    '- `event` を `APPROVE` / `REQUEST_CHANGES` にする（人間レビュアー専用、必ず `COMMENT`）\n\n' +
-    '**JSON の注意:**\n' +
+    '指摘が 10 件あっても 1 件だけでも 0 件でも、`gh api` の呼び出し回数は 1 回で固定。' +
+    'inline 0 件のときは `"comments": []` で送る。\n\n' +
+    '### よくある失敗パターン（絶対やらない）\n\n' +
+    '- ❌ サマリだけ先に `gh api` で投稿し、その後 inline を別の `gh api` 呼び出しで追加する\n' +
+    '- ❌ inline 指摘を 1 件ずつ独立した Review として投稿する（指摘 4 件 = `gh api` 4 回 はバグ）\n' +
+    '- ❌ JSON が大きいから／複雑だからと言って `comments` 配列を分割して複数回投稿する\n' +
+    '- ❌ `gh pr comment` や `mcp__github_inline_comment__create_inline_comment` を使う（UI が壊れる）\n' +
+    '- ❌ `event` を `APPROVE` / `REQUEST_CHANGES` にする（人間レビュアー専用、必ず `COMMENT`）\n\n' +
+    '### JSON の注意\n\n' +
     '- heredoc は必ず `<<\'JSON\'`（シングルクォート版）を使う。変数展開を防ぎ、本文の `$` や `` ` `` をそのまま渡せる\n' +
-    '- `comments[].body` 内のダブルクォートは `\\"` にエスケープする\n\n' +
-    '**inline 指摘が 0 件のとき:**\n' +
-    '`"comments": []` でサマリだけの Review を投稿する。それでも `gh api` は 1 回だけ呼ぶ。\n\n' +
+    '- `comments[].body` 内のダブルクォートは `\\"` にエスケープする\n' +
+    '- 改行を含む `body` は heredoc の中でそのまま改行を書ける\n\n' +
     'レビューは GitHub 上にのみ投稿し、本文をメッセージとして返さないでください。\n',
 );
 

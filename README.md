@@ -18,13 +18,21 @@ on:
   pull_request_review_comment:
     types: [created]
 
+# Same-PR pushes cancel earlier in-flight reviews so only the latest commit is reviewed.
+# event_name in the group keeps review and reply jobs from cancelling each other.
+concurrency:
+  group: pavo-${{ github.event_name }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   pavo:
+    # Skip on PRs from forks: secrets are not exposed to fork workflows.
+    if: ${{ github.event.pull_request.head.repo.fork != true }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
     steps:
       - id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
