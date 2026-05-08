@@ -104,6 +104,8 @@ caller workflow 側で `actions/create-github-app-token` に Client ID と Priva
 
 inline 指摘 0 件・全体として問題なしと判断したときは `event: APPROVE` で投稿される（branch protection で「N 承認必須」を設定している場合 Pavo の APPROVE が承認カウントに加わる点に注意）。指摘がある場合や確信が持てない場合は `event: COMMENT` のまま。`REQUEST_CHANGES` は使わない。
 
+各 review path では、新しいレビューを投稿する前に同 bot の `state: APPROVED` な過去レビューを dismiss する。これにより「commit A で APPROVE → commit B で問題発見 → COMMENT」の流れでも古い APPROVE が承認カウントに残らず、最新のレビュー結果だけが効く。再 APPROVE の場合は dismiss → 新 APPROVE になる。
+
 出力言語は **PR description の主要言語** に合わせる。英語の description なら英語、日本語なら日本語でレビュー・返答する。description が空 or 不明瞭な場合は日本語にフォールバック。
 
 ## 入力リファレンス
@@ -147,8 +149,9 @@ caller の 1 step として動き、`github.event_name` で内部分岐する。
 3. caller repo の PR ブランチを `actions/checkout` で取得
 4. `gh api` で「Pavo bot が過去にこの PR に投稿したコメント一覧」を取得
 5. `${GITHUB_ACTION_PATH}/instructions/system.md` を常時ロードし、`instructions/index.json` の依存グラフを解決した観点 Markdown を結合して prompt を構築
-6. `claude-code-action` を App token + bot identity で起動
-7. Claude が `gh pr diff` を読んで指摘を集めたあと、`gh api POST /pulls/<pr>/reviews` で Review として一括投稿（PR-level body + inline comments を 1 件のレビューにバンドル）
+6. 同 PR にこの bot が残した `state: APPROVED` なレビューがあれば `gh api PUT /pulls/<pr>/reviews/<id>/dismissals` で dismiss（fresh review が活きるように）
+7. `claude-code-action` を App token + bot identity で起動
+8. Claude が `gh pr diff` を読んで指摘を集めたあと、`gh api POST /pulls/<pr>/reviews` で Review として一括投稿（PR-level body + inline comments を 1 件のレビューにバンドル）
 
 **conversation path** (`pull_request_review_comment` トリガー時):
 
