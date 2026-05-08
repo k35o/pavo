@@ -28,7 +28,7 @@ jobs:
     # Skip on PRs from forks: secrets are not exposed to fork workflows.
     if: ${{ github.event.pull_request.head.repo.fork != true }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Opus の review は 3-5 分が常、複雑な PR で 10 分を超えることがある
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
