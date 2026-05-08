@@ -85,6 +85,9 @@ runs:
         inline=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/comments" \
           | jq --arg bot "${BOT_NAME}" \
               '[.[] | select(.user.login == $bot) | {path, line, body}]')
+        reviews=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+          | jq --arg bot "${BOT_NAME}" \
+              '[.[] | select(.user.login == $bot and (.body | length) > 0) | {body}]')
         issue=$(gh api --paginate "/repos/${REPO}/issues/${PR_NUMBER}/comments" \
           | jq --arg bot "${BOT_NAME}" \
               '[.[] | select(.user.login == $bot) | {body}]')
@@ -93,7 +96,9 @@ runs:
           echo "summary<<${delim}"
           echo "### inline comments"
           echo "${inline}"
-          echo "### PR-level comments"
+          echo "### review summaries"
+          echo "${reviews}"
+          echo "### legacy PR-level comments"
           echo "${issue}"
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
@@ -128,7 +133,8 @@ runs:
         bot_name: ${{ steps.bot.outputs.name }}
         prompt: ${{ steps.review-prompt.outputs.prompt }}
         claude_args: |
-          --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          --model opus
+          --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
 
     # ===== conversation path =====
 
@@ -191,4 +197,5 @@ runs:
         bot_name: ${{ steps.bot.outputs.name }}
         prompt: ${{ steps.convo-prompt.outputs.prompt }}
         claude_args: |
+          --model opus
           --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"

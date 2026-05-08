@@ -14,13 +14,7 @@
 
 import process from 'node:process';
 
-const requireEnv = (key) => {
-  const value = process.env[key];
-  if (value === undefined) {
-    throw new Error(`Missing required env: ${key}`);
-  }
-  return value;
-};
+import { requireEnv } from './env.mjs';
 
 const repo = requireEnv('REPO');
 const prNumber = requireEnv('PR_NUMBER');
@@ -43,6 +37,14 @@ sections.push(
     'スレッドの会話と該当ファイルを読んで、簡潔に返答してください。\n' +
     'コードの改善案を示すときはコードブロックを使ってください。\n' +
     '返信は冗長な前置きや謝辞は書かず、論点に直接答えてください。\n',
+);
+
+sections.push(
+  '## 出力フォーマットのルール\n\n' +
+    '- 識別子・短いシンボル名はインラインコード（バッククォート 1 個）で囲む\n' +
+    '- バッククォートを含む引用や、複数行の引用、コメント文・文字列リテラルは必ずフェンス付きコードブロック（バッククォート 3 個）を使う\n' +
+    '- インラインコード内でバッククォートをエスケープしようとしない（GitHub Markdown でレンダリングが壊れる）\n' +
+    '- ファイル全体の参照は `**path/to/file.ts**` のように bold で示し、続けて該当箇所をフェンス付きコードブロックで引用する\n',
 );
 
 sections.push(`## PR description\n\n${prBody || '(empty)'}\n`);

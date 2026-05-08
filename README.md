@@ -138,7 +138,7 @@ caller の 1 step として動き、`github.event_name` で内部分岐する。
 4. `gh api` で「Pavo bot が過去にこの PR に投稿したコメント一覧」を取得
 5. `${GITHUB_ACTION_PATH}/instructions/system.md` を常時ロードし、`instructions/index.json` の依存グラフを解決した観点 Markdown を結合して prompt を構築
 6. `claude-code-action` を App token + bot identity で起動
-7. Claude が `gh pr diff` を読んで `mcp__github_inline_comment__create_inline_comment` と `gh pr comment` でレビューを投稿
+7. Claude が `gh pr diff` を読んで指摘を集めたあと、`gh api POST /pulls/<pr>/reviews` で Review として一括投稿（PR-level body + inline comments を 1 件のレビューにバンドル）
 
 **conversation path** (`pull_request_review_comment` トリガー時):
 
