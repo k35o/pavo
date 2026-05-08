@@ -71,11 +71,14 @@ caller workflow 側で `actions/create-github-app-token` に Client ID と Priva
 
 ## 観点
 
-`instructions/` 直下の Markdown を切り替えてレビュー観点を選ぶ。caller 側で `instructions: default,nextjs` のようにカンマ区切りで指定する。
+`instructions/` 配下の Markdown は 2 種類に分かれる。
+
+- [`system.md`](instructions/system.md) — **常時ロード**。レビュアーの persona・確認のフロー・severity rubric・ノイズ抑制・コメントスタイル・コード引用ルールなど「どうレビューするか」のルール
+- それ以外の `*.md` — 観点の opt-in。caller 側で `instructions: default,nextjs` のようにカンマ区切りで選ぶ
 
 | 観点 | カバー範囲 | 継承 |
 | --- | --- | --- |
-| [`default`](instructions/default.md) | バグ・可読性・テスト・ドキュメント・**セキュリティ**・severity rubric・ノイズ抑制 | — |
+| [`default`](instructions/default.md) | バグ・可読性・テスト・ドキュメント・**セキュリティ** | — |
 | [`frontend`](instructions/frontend.md) | a11y・フォーム・レイアウトシフト・i18n | — |
 | [`react`](instructions/react.md) | `useEffect` 濫用回避・Concurrent Mode・React 19 | `frontend` |
 | [`nextjs`](instructions/nextjs.md) | App Router・Server / Client 境界・Server Actions | `frontend` + `react` |
@@ -133,7 +136,7 @@ caller の 1 step として動き、`github.event_name` で内部分岐する。
 2. `bot` ステップで `gh api /users/<slug>[bot]` を呼んで bot user ID を取得
 3. caller repo の PR ブランチを `actions/checkout` で取得
 4. `gh api` で「Pavo bot が過去にこの PR に投稿したコメント一覧」を取得
-5. `instructions/index.json` の依存グラフを Python で解決し、`${GITHUB_ACTION_PATH}/instructions/<name>.md` を結合して prompt を構築
+5. `${GITHUB_ACTION_PATH}/instructions/system.md` を常時ロードし、`instructions/index.json` の依存グラフを解決した観点 Markdown を結合して prompt を構築
 6. `claude-code-action` を App token + bot identity で起動
 7. Claude が `gh pr diff` を読んで `mcp__github_inline_comment__create_inline_comment` と `gh pr comment` でレビューを投稿
 

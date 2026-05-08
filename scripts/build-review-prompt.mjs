@@ -67,6 +67,11 @@ const existing = process.env.EXISTING ?? '';
 
 const sections = [];
 
+// system.md is always loaded first: it carries the persona and the
+// "how to review" rules that apply regardless of the requested viewpoint.
+const systemPath = path.join(actionPath, 'instructions', 'system.md');
+sections.push(`${fs.readFileSync(systemPath, 'utf8').trimEnd()}\n`);
+
 sections.push(`REPO: ${repo}\nPR NUMBER: ${prNumber}\n`);
 
 sections.push(
