@@ -107,9 +107,14 @@ sections.push(
 
 sections.push(
   '## コメントの投稿方法\n\n' +
-    '- **コードの具体的な問題は必ず inline コメントを使う**: `mcp__github_inline_comment__create_inline_comment` を `confirmed: true` で呼ぶ。対象行が特定できる指摘（バグ・命名・設計・パフォーマンス・テスト不足など）はすべて inline 行きにする\n' +
-    '- `gh pr comment` は **PR 全体のサマリ・所感** にのみ使う。1 度だけ投稿する。個別の指摘を `gh pr comment` の本文に列挙してはいけない\n' +
-    '- 「特に問題なし」のときは `gh pr comment` で 1 行のサマリだけ。inline は不要\n' +
+    '**手順:**\n' +
+    '1. まず diff を眺めて、対象行が特定できる指摘（バグ・命名・設計・パフォーマンス・テスト不足・改善提案）を全部洗い出す\n' +
+    '2. 洗い出した指摘ごとに `mcp__github_inline_comment__create_inline_comment` を `confirmed: true` で呼んで inline コメントを投稿する。1 つの呼び出しで 1 つの指摘\n' +
+    '3. 全 inline コメント投稿後、`gh pr comment` で PR 全体のサマリを 1 度だけ投稿する\n' +
+    '\n' +
+    '**ルール:**\n' +
+    '- 個別の指摘を `gh pr comment` の本文に列挙してはいけない（必ず inline で出す）\n' +
+    '- inline コメント候補が 1 件もない場合のみ、`gh pr comment` のサマリに「指摘事項なし」と書いてよい\n' +
     'コメントは GitHub 上にのみ投稿し、本文をメッセージとして返さないでください。\n',
 );
 
