@@ -124,6 +124,33 @@ runs:
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
 
+    # Dismiss any APPROVED reviews this bot left on prior runs so the fresh
+    # review supersedes them. Without this, a stale APPROVE keeps counting
+    # toward branch protection even after a later run finds issues.
+    - if: steps.gate.outputs.review == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BOT_NAME: ${{ steps.bot.outputs.name }}
+      run: |
+        set -euo pipefail
+        ids=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+          | jq --arg bot "${BOT_NAME}" -r \
+              '.[] | select(.user.login == $bot and .state == "APPROVED") | .id')
+        if [ -z "${ids}" ]; then
+          exit 0
+        fi
+        while IFS= read -r id; do
+          [ -z "${id}" ] && continue
+          echo "Dismissing stale APPROVE review ${id}"
+          gh api --method PUT \
+            "/repos/${REPO}/pulls/${PR_NUMBER}/reviews/${id}/dismissals" \
+            -f message='Superseded by a fresh Pavo review run.' \
+            -f event='DISMISS'
+        done <<< "${ids}"
+
     - if: steps.gate.outputs.review == 'true'
       uses: anthropics/claude-code-action@939ae9c056ecf8a1a01409ddd1c4eadec5f8c77b # v1.0.116
       with:
