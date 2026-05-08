@@ -19,8 +19,9 @@ on:
     types: [created]
 
 # Same-PR pushes cancel earlier in-flight reviews so only the latest commit is reviewed.
+# event_name in the group keeps review and reply jobs from cancelling each other.
 concurrency:
-  group: pavo-${{ github.event.pull_request.number }}
+  group: pavo-${{ github.event_name }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
