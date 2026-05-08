@@ -37,17 +37,16 @@ runs:
         set -euo pipefail
         review=false
         convo=false
-        if [ "${SKIP_LABEL_PRESENT}" = "false" ]; then
+        if [ "${SKIP_LABEL_PRESENT}" = "false" ] && [ "${SENDER_TYPE}" != "Bot" ]; then
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             review=true
           elif [ "${EVENT_NAME}" = "pull_request_review_comment" ] \
-            && [ "${SENDER_TYPE}" != "Bot" ] \
             && [ -n "${IN_REPLY_TO_ID}" ]; then
             convo=true
           fi
         fi
         if [ "${review}" = "false" ] && [ "${convo}" = "false" ]; then
-          echo "::notice::Pavo skipped (event=${EVENT_NAME}, skip_label_present=${SKIP_LABEL_PRESENT})"
+          echo "::notice::Pavo skipped (event=${EVENT_NAME}, sender=${SENDER_TYPE}, skip_label_present=${SKIP_LABEL_PRESENT})"
         fi
         echo "review=${review}" >> "$GITHUB_OUTPUT"
         echo "convo=${convo}" >> "$GITHUB_OUTPUT"

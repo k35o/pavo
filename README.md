@@ -127,6 +127,8 @@ PR に `pavo:skip` label を付けると、`pull_request` / `pull_request_review
 
 label 名を変えたい場合は `with: skip_label: <name>` を渡す。
 
+加えて、event の sender が Bot のとき（changesets/action や Renovate などが開いた PR）は label の有無に関わらず gate でスキップされる。これは下流の `claude-code-action` が Bot 起動の workflow を弾く挙動と整合させるためで、Bot が開いた PR にレビューしたい場合は人間がそのブランチに push するなどして sender を人間にする必要がある。
+
 ## バージョン管理
 
 タグやリリース運用は持たず、ブランチか commit SHA で参照する：
@@ -144,7 +146,7 @@ caller の 1 step として動き、`github.event_name` で内部分岐する。
 
 **review path** (`pull_request` トリガー時):
 
-1. `gate` ステップで skip label / event 種別を判定
+1. `gate` ステップで skip label / event 種別 / sender が Bot でないかを判定（changesets / Renovate 等の Bot が開いた PR は自動スキップ）
 2. `bot` ステップで `gh api /users/<slug>[bot]` を呼んで bot user ID を取得
 3. caller repo の PR ブランチを `actions/checkout` で取得
 4. `gh api` で「Pavo bot が過去にこの PR に投稿したコメント一覧」を取得
