@@ -102,6 +102,8 @@ caller workflow 側で `actions/create-github-app-token` に Client ID と Priva
 
 レビューコメントは重要度を絵文字で区別する：🔴 Critical / 🟡 Warning / 🔵 Suggestion / 👍 Praise
 
+inline 指摘 0 件・全体として問題なしと判断したときは `event: APPROVE` で投稿される（branch protection で「N 承認必須」を設定している場合 Pavo の APPROVE が承認カウントに加わる点に注意）。指摘がある場合や確信が持てない場合は `event: COMMENT` のまま。`REQUEST_CHANGES` は使わない。
+
 出力言語は **PR description の主要言語** に合わせる。英語の description なら英語、日本語なら日本語でレビュー・返答する。description が空 or 不明瞭な場合は日本語にフォールバック。
 
 ## 入力リファレンス

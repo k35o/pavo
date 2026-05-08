@@ -135,12 +135,23 @@ sections.push(
     '```\n\n' +
     '指摘が 10 件あっても 1 件だけでも 0 件でも、`gh api` の呼び出し回数は 1 回で固定。' +
     'inline 0 件のときは `"comments": []` で送る。\n\n' +
+    '### `event` の選び方\n\n' +
+    '- `"APPROVE"` — inline 指摘 0 件かつ全体として問題なしと確信できるとき。' +
+    'サマリ本文には「特に問題なし」+ 確認した観点を簡潔に書く\n' +
+    '- `"COMMENT"` — inline 指摘がある、または「気になる点があるが blocker ではない」「確信が持てない」場合。' +
+    '迷ったらこちらを選ぶ（中立な観察として残す）\n' +
+    '- `"REQUEST_CHANGES"` は使わない（人間レビュアー専用。AI が PR を機械的にブロックすると承認フローが壊れる）\n\n' +
+    '`APPROVE` を選ぶときの追加ルール:\n' +
+    '- 確認のフローで diff の主要部分を読んでいること（軽い目通しだけでの APPROVE は禁止）\n' +
+    '- `🔵 Suggestion` レベルの観察も持っていない場合のみ APPROVE\n' +
+    '- 観察を持っているのに省略して APPROVE するのは禁止（その場合は `COMMENT` で観察を inline に出す）\n\n' +
     '### よくある失敗パターン（絶対やらない）\n\n' +
     '- ❌ サマリだけ先に `gh api` で投稿し、その後 inline を別の `gh api` 呼び出しで追加する\n' +
     '- ❌ inline 指摘を 1 件ずつ独立した Review として投稿する（指摘 4 件 = `gh api` 4 回 はバグ）\n' +
     '- ❌ JSON が大きいから／複雑だからと言って `comments` 配列を分割して複数回投稿する\n' +
     '- ❌ `gh pr comment` や `mcp__github_inline_comment__create_inline_comment` を使う（UI が壊れる）\n' +
-    '- ❌ `event` を `APPROVE` / `REQUEST_CHANGES` にする（人間レビュアー専用、必ず `COMMENT`）\n\n' +
+    '- ❌ inline 指摘が 1 件以上あるのに `event: APPROVE` にする（「直したほうが良い」と書きながら承認は矛盾）\n' +
+    '- ❌ `event: REQUEST_CHANGES` を使う\n\n' +
     '### JSON の注意\n\n' +
     '- heredoc は必ず `<<\'JSON\'`（シングルクォート版）を使う。変数展開を防ぎ、本文の `$` や `` ` `` をそのまま渡せる\n' +
     '- `comments[].body` 内のダブルクォートは `\\"` にエスケープする\n' +
