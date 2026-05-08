@@ -1,0 +1,6 @@
+{
+  "default": [],
+  "frontend": [],
+  "react": ["frontend"],
+  "nextjs": ["frontend", "react"]
+}
