@@ -17,7 +17,9 @@ jobs:
     # token step would fail anyway, and we don't want a permanent red Actions run.
     if: ${{ github.event.pull_request.head.repo.fork != true }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # AI review は Opus 利用時に 3-5 分が常で、複雑な PR では 10 分を超えることがある。
+    # 他の lint/test workflow より長めに bound を取る。
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
