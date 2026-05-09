@@ -150,6 +150,23 @@ runs:
             -f event='DISMISS'
         done <<< "${ids}"
 
+    # Snapshot the highest review id this bot has on the PR right now, so the
+    # post-step can identify reviews that were submitted *during* this run.
+    - id: review-baseline
+      if: steps.gate.outputs.review == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BOT_NAME: ${{ steps.bot.outputs.name }}
+      run: |
+        set -euo pipefail
+        last_id=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+          | jq --arg bot "${BOT_NAME}" -r \
+              '[.[] | select(.user.login == $bot) | .id] | (max // 0)')
+        echo "last_id=${last_id}" >> "$GITHUB_OUTPUT"
+
     - if: steps.gate.outputs.review == 'true'
       uses: anthropics/claude-code-action@939ae9c056ecf8a1a01409ddd1c4eadec5f8c77b # v1.0.116
       with:
@@ -161,6 +178,48 @@ runs:
         claude_args: |
           --model sonnet
           --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+
+    # Claude is instructed to call `POST /reviews` exactly once per session,
+    # but Sonnet sometimes posts the same review multiple times anyway. Submitted
+    # reviews can't be deleted, so we neutralize duplicates: drop their inline
+    # comments and overwrite the body with a [superseded] marker, keeping only
+    # the most recent submission as the canonical review.
+    # Use !cancelled() so cleanup still runs if claude-code-action errors mid-flight
+    # after posting one or more duplicates.
+    - if: ${{ !cancelled() && steps.gate.outputs.review == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BOT_NAME: ${{ steps.bot.outputs.name }}
+        BASELINE_ID: ${{ steps.review-baseline.outputs.last_id }}
+      run: |
+        set -euo pipefail
+        new_ids=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+          | jq --arg bot "${BOT_NAME}" --argjson baseline "${BASELINE_ID:-0}" -r \
+              '[.[] | select(.user.login == $bot and .id > $baseline) | .id] | sort | .[]')
+        count=$(printf '%s\n' "${new_ids}" | grep -c . || true)
+        if [ "${count}" -le 1 ]; then
+          exit 0
+        fi
+        keep=$(printf '%s\n' "${new_ids}" | tail -n 1)
+        echo "::warning::Pavo posted ${count} reviews in one session; superseding all but ${keep}."
+        printf '%s\n' "${new_ids}" | head -n "$((count - 1))" | while IFS= read -r id; do
+          [ -z "${id}" ] && continue
+          echo "Superseding duplicate review ${id} (canonical: ${keep})"
+          comment_ids=$(gh api --paginate \
+            "/repos/${REPO}/pulls/${PR_NUMBER}/reviews/${id}/comments" \
+            | jq -r '.[].id')
+          while IFS= read -r cid; do
+            [ -z "${cid}" ] && continue
+            gh api --method DELETE "/repos/${REPO}/pulls/comments/${cid}" || true
+          done <<< "${comment_ids}"
+          gh api --method PUT \
+            "/repos/${REPO}/pulls/${PR_NUMBER}/reviews/${id}" \
+            -f body="[superseded] Pavo が同一セッションで複数回投稿してしまったレビュー。最新の review #${keep} を参照してください。" \
+            || true
+        done
 
     # ===== conversation path =====
 

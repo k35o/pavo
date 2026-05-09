@@ -106,6 +106,8 @@ inline 指摘 0 件・全体として問題なしと判断したときは `event
 
 各 review path では、新しいレビューを投稿する前に同 bot の `state: APPROVED` な過去レビューを dismiss する。これにより「commit A で APPROVE → commit B で問題発見 → COMMENT」の流れでも古い APPROVE が承認カウントに残らず、最新のレビュー結果だけが効く。再 APPROVE の場合は dismiss → 新 APPROVE になる。
 
+`claude-code-action` は本来 1 セッションで `POST /reviews` を 1 回しか呼ばないようプロンプトで縛っているが、まれに同一レビューを複数回投稿してしまう。レビュー投稿後に「今回のセッションで作られたレビュー」を id baseline で検出し、2 件以上あれば最後の 1 件だけを残し、残りは inline comment を削除して body を `[superseded]` で上書きする。submitted review は API で削除できないため、無害化で対応する。
+
 出力言語は **PR description の主要言語** に合わせる。英語の description なら英語、日本語なら日本語でレビュー・返答する。description が空 or 不明瞭な場合は日本語にフォールバック。
 
 ## 入力リファレンス
@@ -152,8 +154,10 @@ caller の 1 step として動き、`github.event_name` で内部分岐する。
 4. `gh api` で「Pavo bot が過去にこの PR に投稿したコメント一覧」を取得
 5. `${GITHUB_ACTION_PATH}/instructions/system.md` を常時ロードし、`instructions/index.json` の依存グラフを解決した観点 Markdown を結合して prompt を構築
 6. 同 PR にこの bot が残した `state: APPROVED` なレビューがあれば `gh api PUT /pulls/<pr>/reviews/<id>/dismissals` で dismiss（fresh review が活きるように）
-7. `claude-code-action` を App token + bot identity で起動
-8. Claude が `gh pr diff` を読んで指摘を集めたあと、`gh api POST /pulls/<pr>/reviews` で Review として一括投稿（PR-level body + inline comments を 1 件のレビューにバンドル）
+7. baseline step で「今この bot が持っている最新 review id」を記録（post-step が「今回 run 中に投稿された review」を識別するため）
+8. `claude-code-action` を App token + bot identity で起動
+9. Claude が `gh pr diff` を読んで指摘を集めたあと、`gh api POST /pulls/<pr>/reviews` で Review として一括投稿（PR-level body + inline comments を 1 件のレビューにバンドル）
+10. dedupe step が baseline 以降に投稿された同 bot のレビューを列挙し、2 件以上あれば最後の 1 件だけ残して他は inline comment を削除 + body を `[superseded]` に上書き
 
 **conversation path** (`pull_request_review_comment` トリガー時):
 
