@@ -162,13 +162,13 @@ runs:
           echo "--max-turns 60"
           echo "--setting-sources user"
           echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
-          echo "--disallowedTools \"Read(./.git/**)\""
+          echo "--disallowedTools \"Read(./.git/**),Grep(./.git/**)\""
           echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/review.json")'"
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
       # MODEL comes from gate so the pavo:deep label override applies.
       # --setting-sources user: never load .claude/settings.json (hooks) from
-      # the checked-out PR. Read(./.git/**) is denied because claude-code-action
+      # the checked-out PR. Read/Grep are denied on .git/ because claude-code-action
       # configures git auth with the App token in .git/config. The allowlist has
       # no write or gh-api tools; the review is posted by post-review.mjs.
 
@@ -234,7 +234,7 @@ runs:
           echo "--max-turns 30"
           echo "--setting-sources user"
           echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
-          echo "--disallowedTools \"Read(./.git/**)\""
+          echo "--disallowedTools \"Read(./.git/**),Grep(./.git/**)\""
           echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/reply.json")'"
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"

@@ -172,7 +172,7 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 - **信頼境界**: PR description・コード・コメントはすべて「データ」としてフェンス付きでプロンプトに渡され、system.md がそれらの中の指示に従うことを禁止している。レビュー挙動を操作しようとする文章は 🔴 として報告される
 - **最小ツール**: Claude に許可されるのは読み取り系ツールのみ。GitHub への書き込み（投稿・dismiss・resolve）はすべて Pavo のスクリプトが固定のエンドポイントに対して行う
 - **設定ファイルの遮断**: `--setting-sources user` により、checkout した PR 内の `.claude/settings.json`（hooks = 任意コマンド実行）は読み込まれない。レビュー設定（`.github/pavo.json` 等）はデフォルトブランチから読まれるため、PR が自分の審査基準を書き換えることもできない
-- **checkout**: PR の head commit を `persist-credentials: false` で checkout する（`gh pr diff` が示すもの・`Read` が読むもの・inline コメントのアンカーが常に同一 commit になる）。`claude-code-action` 自身は App token を `.git/config` に書き込むため、Claude の `Read` から `.git/` 配下を deny している
+- **checkout**: PR の head commit を `persist-credentials: false` で checkout する（`gh pr diff` が示すもの・`Read` が読むもの・inline コメントのアンカーが常に同一 commit になる）。`claude-code-action` 自身は App token を `.git/config` に書き込むため、Claude の `Read` / `Grep` から `.git/` 配下を deny している
 - **APPROVE の扱い**: Pavo の APPROVE は branch protection の承認カウントに入る。必須承認数を Pavo で満たしうる構成にしたくない場合は `approve: false` を設定する
 
 ## アーキテクチャ

@@ -23,6 +23,9 @@ jobs:
     uses: k35o/pavo/.github/workflows/review.yml@main
     with:
       instructions: default,github-actions,node
+      # Renovate PRs (mainly claude-code-action bumps) get reviewed too — the
+      # dogfood review doubles as the pre-merge sanity signal for upstream bumps.
+      allow_bots: renovate
       extra_prompt: |
         Pavo 自身のリポジトリです。GitHub composite action と AI レビュー観点 Markdown、
         プロンプト生成・レビュー投稿用の Node.js スクリプトで構成されています。
