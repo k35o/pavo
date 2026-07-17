@@ -26,6 +26,9 @@ jobs:
   pavo:
     # /pavo コマンド以外の通常コメントで runner を起こさないための事前フィルタ
     if: ${{ github.event_name != 'issue_comment' || startsWith(github.event.comment.body, '/pavo') }}
+    permissions:
+      contents: read
+      pull-requests: write
     uses: k35o/pavo/.github/workflows/review.yml@main
     with:
       instructions: default,nextjs
