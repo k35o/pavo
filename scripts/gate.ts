@@ -168,11 +168,9 @@ export function resolveModel(configuredModel: string, labels: string[]): string 
   return labels.includes(DEEP_LABEL) ? 'opus' : configuredModel;
 }
 
-function fetchRepoFile(repository: string, filePath: string): string | null {
-  const file = ghJson<{ content?: string }>(
-    ['api', `repos/${repository}/contents/${filePath}`],
-    { allowFailure: true },
-  );
+function fetchRepoFile(repository: string, filePath: string, ref?: string): string | null {
+  const path = ref ? `repos/${repository}/contents/${filePath}?ref=${ref}` : `repos/${repository}/contents/${filePath}`;
+  const file = ghJson<{ content?: string }>(['api', path], { allowFailure: true });
   if (!file?.content) return null;
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
@@ -249,11 +247,16 @@ function main(): void {
   const outDir = requireEnv('OUT_DIR');
   fs.mkdirSync(outDir, { recursive: true });
   const sideFiles: Record<string, string> = {};
-  for (const [key, filePath] of [
-    ['repo_context_file', '.github/pavo.md'],
-    ['learnings_file', '.github/pavo-learnings.md'],
+  // Learnings live on the pavo/learnings branch (post-reply.ts writes there
+  // because default branches are typically PR-only), with a default-branch
+  // fallback for repos that maintain the file by hand.
+  for (const [key, filePath, ref] of [
+    ['repo_context_file', '.github/pavo.md', undefined],
+    ['learnings_file', '.github/pavo-learnings.md', 'pavo/learnings'],
   ] as const) {
-    const content = fetchRepoFile(repository, filePath);
+    const content =
+      fetchRepoFile(repository, filePath, ref) ??
+      (ref ? fetchRepoFile(repository, filePath) : null);
     if (content === null) {
       sideFiles[key] = '';
       continue;

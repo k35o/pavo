@@ -14,6 +14,9 @@ import { gh, ghGraphql, ghJson } from './lib/gh.ts';
 import { requireEnv } from './env.ts';
 
 const LEARNINGS_PATH = '.github/pavo-learnings.md';
+// A dedicated branch, not the default branch: rulesets like "changes must be
+// made through a pull request" reject direct commits to main with HTTP 409.
+const LEARNINGS_BRANCH = 'pavo/learnings';
 
 /** Structured conversation output validated against schemas/reply.json. */
 interface ReplyOutput {
@@ -22,14 +25,49 @@ interface ReplyOutput {
   remember?: string;
 }
 
+function ensureLearningsBranch(repo: string): boolean {
+  const existing = ghJson<{ ref?: string }>(
+    ['api', `repos/${repo}/git/ref/heads/${LEARNINGS_BRANCH}`],
+    { allowFailure: true },
+  );
+  if (existing?.ref) return true;
+  const repoInfo = ghJson<{ default_branch?: string }>(['api', `repos/${repo}`], {
+    allowFailure: true,
+  });
+  if (!repoInfo?.default_branch) return false;
+  const base = ghJson<{ object?: { sha?: string } }>(
+    ['api', `repos/${repo}/git/ref/heads/${repoInfo.default_branch}`],
+    { allowFailure: true },
+  );
+  if (!base?.object?.sha) return false;
+  const created = gh(
+    [
+      'api',
+      '--method',
+      'POST',
+      `repos/${repo}/git/refs`,
+      '-f',
+      `ref=refs/heads/${LEARNINGS_BRANCH}`,
+      '-f',
+      `sha=${base.object.sha}`,
+    ],
+    { allowFailure: true },
+  );
+  return created.ok;
+}
+
 /**
- * Append a learning to .github/pavo-learnings.md on the default branch.
+ * Append a learning to .github/pavo-learnings.md on the pavo/learnings branch.
  * Requires Contents: Read & write on the GitHub App; degrades gracefully.
- * @returns whether the learning was saved
+ * @returns an error description, or null on success
  */
-function saveLearning(repo: string, prNumber: string, learning: string): boolean {
+function saveLearning(repo: string, prNumber: string, learning: string): string | null {
+  if (!ensureLearningsBranch(repo)) {
+    warning(`Failed to create the ${LEARNINGS_BRANCH} branch (Contents: write required?).`);
+    return `ブランチ \`${LEARNINGS_BRANCH}\` を作成できませんでした（App の \`Contents: Read & write\` 権限を確認してください）`;
+  }
   const existing = ghJson<{ content?: string; sha?: string }>(
-    ['api', `repos/${repo}/contents/${LEARNINGS_PATH}`],
+    ['api', `repos/${repo}/contents/${LEARNINGS_PATH}?ref=${LEARNINGS_BRANCH}`],
     { allowFailure: true },
   );
   const previous = existing?.content
@@ -41,6 +79,7 @@ function saveLearning(repo: string, prNumber: string, learning: string): boolean
   const payload = {
     message: `chore(pavo): record a review learning from #${prNumber}`,
     content: Buffer.from(next, 'utf8').toString('base64'),
+    branch: LEARNINGS_BRANCH,
     ...(existing?.sha ? { sha: existing.sha } : {}),
   };
   const result = gh(
@@ -48,9 +87,12 @@ function saveLearning(repo: string, prNumber: string, learning: string): boolean
     { input: JSON.stringify(payload), allowFailure: true },
   );
   if (!result.ok) {
-    warning(`Failed to save learning (Contents: write required?): ${result.stderr}`);
+    warning(`Failed to save learning: ${result.stderr}`);
+    return result.stderr.includes('403') || result.stderr.includes('Resource not accessible')
+      ? 'App の `Contents: Read & write` 権限が必要です'
+      : `保存 API がエラーを返しました: ${result.stderr.slice(0, 200).replaceAll('\n', ' ')}`;
   }
-  return result.ok;
+  return null;
 }
 
 function resolveThread(repo: string, prNumber: string, rootId: string, botName: string): boolean {
@@ -107,10 +149,12 @@ function main(): void {
 
   let learningSaved = false;
   if (output.remember) {
-    learningSaved = saveLearning(repo, prNumber, String(output.remember));
-    if (!learningSaved) {
-      body +=
-        '\n\n> [!NOTE]\n> この方針を learnings に保存しようとしましたが、GitHub App に `Contents: Read & write` 権限がないため保存できませんでした。';
+    const failure = saveLearning(repo, prNumber, String(output.remember));
+    learningSaved = failure === null;
+    if (failure) {
+      body += `\n\n> [!NOTE]\n> この方針を learnings に保存しようとしましたが、失敗しました: ${failure}`;
+    } else {
+      body += `\n\n> [!NOTE]\n> \`${LEARNINGS_PATH}\`（\`${LEARNINGS_BRANCH}\` ブランチ）に記録しました。以後のレビューに反映されます。`;
     }
   }
 
