@@ -291,16 +291,19 @@ Workflow YAML・composite action・CI 用シェルスクリプトに関わる観
 export function resolveViewpoints(requested: string): string[] {
   const seen = new Set<string>();
   const bodies: string[] = [];
-  const visit = (raw: string): void => {
+  const visit = (raw: string, stack: string[]): void => {
     const name = raw.trim();
     if (!name || seen.has(name)) return;
+    if (stack.includes(name)) {
+      throw new Error(`Circular viewpoint dependency: ${[...stack, name].join(' -> ')}`);
+    }
     if (!(name in VIEWPOINTS)) {
       throw new Error(`Unknown viewpoint: ${name} (known: ${Object.keys(VIEWPOINTS).join(', ')})`);
     }
-    for (const dep of VIEWPOINT_DEPS[name] ?? []) visit(dep);
+    for (const dep of VIEWPOINT_DEPS[name] ?? []) visit(dep, [...stack, name]);
     seen.add(name);
     bodies.push(VIEWPOINTS[name] ?? '');
   };
-  for (const raw of requested.split(',')) visit(raw);
+  for (const raw of requested.split(',')) visit(raw, []);
   return bodies;
 }
