@@ -111,7 +111,7 @@ runs:
     # .git/config; claude-code-action still writes its own git auth there, so
     # the claude steps below additionally deny Read on .git/.
     - if: steps.gate.outputs.mode == 'review'
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         ref: ${{ steps.gate.outputs.head_sha }}
         fetch-depth: 1
@@ -203,7 +203,7 @@ runs:
     # ===== conversation path =====
 
     - if: steps.gate.outputs.mode == 'convo'
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         ref: ${{ steps.gate.outputs.head_sha }}
         fetch-depth: 1
