@@ -1,5 +1,7 @@
 import { defaultGitHubAuth, githubChannel } from 'eve/channels/github';
 
+import { resolveViewpoints } from '../lib/viewpoints.ts';
+
 // Gate logic ported from the Actions incarnation's gate.ts decide().
 // Hooks return null to ignore; { auth, context } dispatches a turn. The
 // channel itself verifies webhook signatures, injects the PR diff + a
@@ -21,6 +23,19 @@ function allowedRepo(fullName: string): boolean {
 
 function disabled(): boolean {
   return (process.env.PAVO_EVE_DISABLED ?? '').toLowerCase() === 'true';
+}
+
+// Repo -> comma-separated viewpoint names (JSON object). `default` is always
+// included; unknown repos get only `default`.
+function viewpointsFor(fullName: string): string[] {
+  let map: Record<string, string> = {};
+  try {
+    map = JSON.parse(process.env.PAVO_EVE_INSTRUCTIONS_MAP ?? '{}');
+  } catch {
+    map = {};
+  }
+  const extras = map[fullName] ?? '';
+  return resolveViewpoints(extras ? `default,${extras}` : 'default');
 }
 
 export default githubChannel({
@@ -68,6 +83,7 @@ export default githubChannel({
           '',
           'instructions のレビュー手順に従って diff とコードを確認し、最後に submit_review ツールを 1 回だけ呼んでください。',
         ].join('\n'),
+        ...viewpointsFor(ctx.repository.fullName),
       ],
     };
   },
