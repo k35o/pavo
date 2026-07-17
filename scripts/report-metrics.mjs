@@ -25,7 +25,7 @@ function fetchThreadStats(repo, prNumber, botName) {
               comments(first: 1) {
                 nodes {
                   author { login }
-                  reactionGroups { content reactions { totalCount } }
+                  reactionGroups { content reactors { totalCount } }
                 }
               }
             }
@@ -49,8 +49,8 @@ function fetchThreadStats(repo, prNumber, botName) {
       stats.threads += 1;
       if (thread.isResolved) stats.resolved += 1;
       for (const group of root.reactionGroups ?? []) {
-        if (group.content === 'THUMBS_UP') stats.thumbsUp += group.reactions.totalCount;
-        if (group.content === 'THUMBS_DOWN') stats.thumbsDown += group.reactions.totalCount;
+        if (group.content === 'THUMBS_UP') stats.thumbsUp += group.reactors.totalCount;
+        if (group.content === 'THUMBS_DOWN') stats.thumbsDown += group.reactors.totalCount;
       }
     }
     if (!connection.pageInfo.hasNextPage) break;

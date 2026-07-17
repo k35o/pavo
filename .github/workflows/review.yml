@@ -57,9 +57,12 @@ jobs:
     if: ${{ github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Only checkout needs the workflow token; every GitHub write (review,
+    # reply, dismiss, resolve) goes through the App installation token. Keeping
+    # this at contents:read means callers with restricted default permissions
+    # need no explicit grant.
     permissions:
       contents: read
-      pull-requests: write
     # Same-PR pushes cancel earlier in-flight reviews so only the latest commit
     # is reviewed. comment.id keeps each reply/command run in its own group —
     # without it, two quick replies cancel each other and the first is lost.

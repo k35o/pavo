@@ -2,5 +2,12 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>k35o/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "upstream の挙動変更リスク（structured_output / claude_args / sanitizer）があるため、merge 後の最初の PR で dogfood レビューを確認する",
+      "matchPackageNames": ["anthropics/claude-code-action"],
+      "addLabels": ["upstream-bump"]
+    }
   ]
 }
