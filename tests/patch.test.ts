@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isValidAnchor, parsePatchLines } from '../scripts/lib/patch.ts';
+import { isValidAnchor, parsePatchLines } from '../agent/lib/patch.ts';
 
 const PATCH = [
   '@@ -1,4 +1,5 @@',

@@ -1,2 +1,9 @@
-.DS_Store
 node_modules/
+.eve/
+.output/
+.vercel/
+spike-fugu.mjs
+fnox.toml
+.env
+.env.*
+!.env.example
