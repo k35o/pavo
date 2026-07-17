@@ -6,18 +6,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * @param {string} actionPath pavo repo checkout
- * @param {string} requested comma-separated names / `./` workspace paths
- * @param {{workspace?: string}} [options]
- * @returns {string[]} absolute file paths in load order, duplicates removed
+ * @param actionPath pavo repo checkout
+ * @param requested comma-separated names / `./` workspace paths
+ * @returns absolute file paths in load order, duplicates removed
  */
-export function resolveInstructionFiles(actionPath, requested, { workspace } = {}) {
+export function resolveInstructionFiles(
+  actionPath: string,
+  requested: string,
+  { workspace }: { workspace?: string | null } = {},
+): string[] {
   const manifestPath = path.join(actionPath, 'instructions', 'index.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  const seen = new Set();
-  const files = [];
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, string[]>;
+  const seen = new Set<string>();
+  const files: string[] = [];
 
-  const visit = (raw, stack) => {
+  const visit = (raw: string, stack: string[]): void => {
     const name = raw.trim();
     if (!name || seen.has(name)) return;
     if (stack.includes(name)) {
@@ -51,7 +54,7 @@ export function resolveInstructionFiles(actionPath, requested, { workspace } = {
     if (!Object.hasOwn(manifest, name)) {
       throw new Error(`Unknown instruction: ${name} (known: ${Object.keys(manifest).join(', ')})`);
     }
-    for (const dep of manifest[name]) {
+    for (const dep of manifest[name] ?? []) {
       visit(dep, [...stack, name]);
     }
     const file = path.join(actionPath, 'instructions', `${name}.md`);

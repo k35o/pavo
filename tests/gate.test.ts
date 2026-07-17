@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { decide, resolveModel } from '../scripts/gate.mjs';
+import { decide, resolveModel } from '../scripts/gate.ts';
+import type { GateDecision, GateDeps, GateEvent, GateOptions } from '../scripts/gate.ts';
 
 const BOT = 'k35o-bot[bot]';
 const REPO = 'k35o/example';
-const OPTIONS = {
+const OPTIONS: GateOptions = {
   botName: BOT,
   repository: REPO,
   skipLabel: 'pavo:skip',
@@ -13,9 +14,9 @@ const OPTIONS = {
   allowBots: [],
   disabled: false,
 };
-const DEPS = { fetchPullRequest: () => null };
+const DEPS: GateDeps = { fetchPullRequest: () => null };
 
-const pr = (overrides = {}) => ({
+const pr = (overrides: Record<string, unknown> = {}) => ({
   number: 7,
   title: 'feat: x',
   body: 'desc',
@@ -26,7 +27,11 @@ const pr = (overrides = {}) => ({
   ...overrides,
 });
 
-const prEvent = (action, prOverrides = {}, payloadOverrides = {}) => ({
+const prEvent = (
+  action: string,
+  prOverrides: Record<string, unknown> = {},
+  payloadOverrides: Record<string, unknown> = {},
+): GateEvent => ({
   name: 'pull_request',
   payload: {
     action,
@@ -37,7 +42,10 @@ const prEvent = (action, prOverrides = {}, payloadOverrides = {}) => ({
 });
 
 test('opened は review になる', () => {
-  const result = decide(prEvent('opened'), OPTIONS, DEPS);
+  const result = decide(prEvent('opened'), OPTIONS, DEPS) as Extract<
+    GateDecision,
+    { mode: 'review' }
+  >;
   assert.equal(result.mode, 'review');
   assert.equal(result.pr.number, 7);
   assert.equal(result.pr.headSha, 'abc123');
@@ -106,7 +114,7 @@ test('review_requested は自 bot 宛のときだけ review', () => {
 });
 
 test('/pavo コマンドは PR を取得して review（draft と skip label より優先）', () => {
-  const event = {
+  const event: GateEvent = {
     name: 'issue_comment',
     payload: {
       action: 'created',
@@ -115,19 +123,19 @@ test('/pavo コマンドは PR を取得して review（draft と skip label よ
       issue: { number: 9, pull_request: {} },
     },
   };
-  const deps = {
+  const deps: GateDeps = {
     fetchPullRequest: (number) => {
       assert.equal(number, 9);
       return pr({ number: 9, draft: true, labels: [{ name: 'pavo:skip' }] });
     },
   };
-  const result = decide(event, OPTIONS, deps);
+  const result = decide(event, OPTIONS, deps) as Extract<GateDecision, { mode: 'review' }>;
   assert.equal(result.mode, 'review');
   assert.equal(result.onDemand, true);
 });
 
 test('/pavo は信頼できる association 以外を拒否、通常コメントは無視', () => {
-  const base = {
+  const base: GateEvent = {
     name: 'issue_comment',
     payload: {
       action: 'created',
@@ -143,7 +151,7 @@ test('/pavo は信頼できる association 以外を拒否、通常コメント�
 });
 
 test('レビューコメント返信は convo、トップレベルコメントや外部ユーザーはスキップ', () => {
-  const reply = {
+  const reply: GateEvent = {
     name: 'pull_request_review_comment',
     payload: {
       action: 'created',
@@ -152,7 +160,7 @@ test('レビューコメント返信は convo、トップレベルコメント�
       pull_request: pr(),
     },
   };
-  const result = decide(reply, OPTIONS, DEPS);
+  const result = decide(reply, OPTIONS, DEPS) as Extract<GateDecision, { mode: 'convo' }>;
   assert.equal(result.mode, 'convo');
   assert.deepEqual(result.convo, { rootId: 11 });
 

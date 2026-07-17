@@ -8,22 +8,30 @@
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { addStepSummary, notice, warning } from './lib/actions.mjs';
-import { sameLogin } from './lib/bot.mjs';
-import { gh, ghGraphql, ghJson } from './lib/gh.mjs';
-import { requireEnv } from './env.mjs';
+import { addStepSummary, notice, warning } from './lib/actions.ts';
+import { sameLogin } from './lib/bot.ts';
+import { gh, ghGraphql, ghJson } from './lib/gh.ts';
+import { requireEnv } from './env.ts';
 
 const LEARNINGS_PATH = '.github/pavo-learnings.md';
+
+/** Structured conversation output validated against schemas/reply.json. */
+interface ReplyOutput {
+  body: string;
+  resolve_thread: boolean;
+  remember?: string;
+}
 
 /**
  * Append a learning to .github/pavo-learnings.md on the default branch.
  * Requires Contents: Read & write on the GitHub App; degrades gracefully.
- * @returns {boolean} whether the learning was saved
+ * @returns whether the learning was saved
  */
-function saveLearning(repo, prNumber, learning) {
-  const existing = ghJson(['api', `repos/${repo}/contents/${LEARNINGS_PATH}`], {
-    allowFailure: true,
-  });
+function saveLearning(repo: string, prNumber: string, learning: string): boolean {
+  const existing = ghJson<{ content?: string; sha?: string }>(
+    ['api', `repos/${repo}/contents/${LEARNINGS_PATH}`],
+    { allowFailure: true },
+  );
   const previous = existing?.content
     ? Buffer.from(existing.content, 'base64').toString('utf8')
     : '# Pavo learnings\n\nレビューのやり取りから蓄積された、このリポジトリ固有の方針メモ。\n';
@@ -45,7 +53,7 @@ function saveLearning(repo, prNumber, learning) {
   return result.ok;
 }
 
-function resolveThread(repo, prNumber, rootId, botName) {
+function resolveThread(repo: string, prNumber: string, rootId: string, botName: string): boolean {
   const [owner, name] = repo.split('/');
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -62,11 +70,11 @@ function resolveThread(repo, prNumber, rootId, botName) {
         }
       }
     }`;
-  let cursor = null;
+  let cursor: string | null = null;
   for (let page = 0; page < 10; page += 1) {
-    const data = ghGraphql(query, {
-      owner,
-      name,
+    const data: any = ghGraphql(query, {
+      owner: owner!,
+      name: name!,
       number: Number(prNumber),
       ...(cursor ? { cursor } : {}),
     });
@@ -87,12 +95,12 @@ function resolveThread(repo, prNumber, rootId, botName) {
   return false;
 }
 
-function main() {
+function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
   const rootId = requireEnv('ROOT_ID');
   const botName = requireEnv('BOT_NAME');
-  const output = JSON.parse(requireEnv('STRUCTURED_OUTPUT'));
+  const output = JSON.parse(requireEnv('STRUCTURED_OUTPUT')) as ReplyOutput;
 
   let body = String(output.body ?? '').trim();
   if (!body) throw new Error('Structured output has no reply body.');

@@ -4,12 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { resolveInstructionFiles } from '../scripts/lib/instructions.mjs';
+import { resolveInstructionFiles } from '../scripts/lib/instructions.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
 test('index.json のすべてのエントリと依存に対応する .md が存在する', () => {
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'instructions/index.json'), 'utf8'));
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'instructions/index.json'), 'utf8'),
+  ) as Record<string, string[]>;
   for (const [name, deps] of Object.entries(manifest)) {
     assert.ok(
       fs.existsSync(path.join(ROOT, 'instructions', `${name}.md`)),
@@ -46,7 +48,7 @@ test('workspace 相対の ./ エントリを解決する', () => {
   fs.mkdirSync(path.join(workspace, 'docs'), { recursive: true });
   fs.writeFileSync(path.join(workspace, 'docs/custom.md'), '# custom');
   const files = resolveInstructionFiles(ROOT, 'default,./docs/custom.md', { workspace });
-  assert.equal(path.basename(files[0]), 'default.md');
+  assert.equal(path.basename(files[0]!), 'default.md');
   assert.equal(files[1], path.join(workspace, 'docs/custom.md'));
 });
 
@@ -70,11 +72,13 @@ test('workspace 外を指す symlink の ./ エントリは拒否する', () => 
 });
 
 test('README の観点テーブルに存在しない観点名がない', () => {
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'instructions/index.json'), 'utf8'));
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'instructions/index.json'), 'utf8'),
+  ) as Record<string, string[]>;
   const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
   const linked = [...readme.matchAll(/\[`([a-z-]+)`\]\(instructions\/([a-z-]+)\.md\)/g)];
   for (const [, label, file] of linked) {
     assert.equal(label, file, `README のリンク表記が不一致: ${label} -> ${file}`);
-    assert.ok(Object.hasOwn(manifest, file), `README が index.json にない観点 ${file} を参照`);
+    assert.ok(Object.hasOwn(manifest, file!), `README が index.json にない観点 ${file} を参照`);
   }
 });

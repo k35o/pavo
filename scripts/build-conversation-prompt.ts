@@ -3,7 +3,7 @@
 // Fetches the thread itself (REST, manually paginated) and includes the root
 // comment's diff_hunk so Claude replies about the right lines instead of
 // guessing them from the file path. Claude returns structured JSON; posting
-// is done by post-reply.mjs.
+// is done by post-reply.ts.
 //
 // Required env: ACTION_PATH, REPO, PR_NUMBER, ROOT_ID, BOT_NAME, CONFIG
 // Optional env: GITHUB_WORKSPACE, PR_TITLE, PR_BODY
@@ -13,13 +13,15 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { setOutputs } from './lib/actions.mjs';
-import { ghJson, ghPaginate } from './lib/gh.mjs';
-import { requireEnv } from './env.mjs';
+import { setOutputs } from './lib/actions.ts';
+import { ghJson, ghPaginate } from './lib/gh.ts';
+import { requireEnv } from './env.ts';
+import type { PavoConfig } from './lib/types.ts';
 
-const sanitizeUntrusted = (text) => (text ?? '').replaceAll('</pavo-', '<\\/pavo-');
+const sanitizeUntrusted = (text: string | null | undefined): string =>
+  (text ?? '').replaceAll('</pavo-', '<\\/pavo-');
 
-function languageSection(language) {
+function languageSection(language: string): string {
   if (language === 'ja') return '## 出力言語\n\n返答は日本語で書いてください。\n';
   if (language === 'en') return '## 出力言語\n\n返答は英語で書いてください。\n';
   return (
@@ -29,9 +31,22 @@ function languageSection(language) {
   );
 }
 
-/**
- * @returns {string}
- */
+/** REST review-comment payload — only the fields we touch are accessed. */
+type ReviewComment = any;
+
+export interface ConversationPromptParams {
+  actionPath: string;
+  config: PavoConfig;
+  repo: string;
+  prNumber: string | number;
+  prTitle: string;
+  prBody: string;
+  root: ReviewComment;
+  thread: ReviewComment[];
+  botName: string;
+  repoContextMd?: string | null;
+}
+
 export function buildConversationPrompt({
   actionPath,
   config,
@@ -43,8 +58,8 @@ export function buildConversationPrompt({
   thread,
   botName,
   repoContextMd = null,
-}) {
-  const sections = [];
+}: ConversationPromptParams): string {
+  const sections: string[] = [];
   const instructionsDir = path.join(actionPath, 'instructions');
 
   sections.push(`${fs.readFileSync(path.join(instructionsDir, 'conversation.md'), 'utf8').trimEnd()}\n`);
@@ -65,7 +80,7 @@ export function buildConversationPrompt({
 
   sections.push(languageSection(config.language));
 
-  const repoContext = [];
+  const repoContext: string[] = [];
   if (repoContextMd) repoContext.push(repoContextMd.trimEnd());
   if (config.extraPrompt) repoContext.push(config.extraPrompt.trimEnd());
   if (repoContext.length > 0) {
@@ -109,7 +124,7 @@ export function buildConversationPrompt({
   return sections.join('\n---\n\n');
 }
 
-function main() {
+function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
   const rootId = Number(requireEnv('ROOT_ID'));
@@ -130,7 +145,7 @@ function main() {
   const repoContextFile = process.env.REPO_CONTEXT_FILE;
   const prompt = buildConversationPrompt({
     actionPath: requireEnv('ACTION_PATH'),
-    config: JSON.parse(requireEnv('CONFIG')),
+    config: JSON.parse(requireEnv('CONFIG')) as PavoConfig,
     repo,
     prNumber,
     prTitle: process.env.PR_TITLE ?? '',

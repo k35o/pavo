@@ -18,23 +18,57 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { setOutputs, notice } from './lib/actions.mjs';
-import { resolveConfig } from './lib/config.mjs';
-import { ghJson } from './lib/gh.mjs';
-import { requireEnv } from './env.mjs';
+import { setOutputs, notice } from './lib/actions.ts';
+import { resolveConfig, type RepoConfig } from './lib/config.ts';
+import { ghJson } from './lib/gh.ts';
+import { requireEnv } from './env.ts';
 
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const COMMAND_PATTERN = /^\/pavo(?:\s+review)?\s*$/;
 const DEEP_LABEL = 'pavo:deep';
 const PR_BODY_LIMIT = 16000;
 
-const skip = (reason) => ({ mode: 'skip', reason });
+/** Untyped webhook payload — only the fields we touch are accessed. */
+type Payload = any;
 
-function normalizeBotLogin(login) {
+export interface GateEvent {
+  name: string;
+  payload: Payload;
+}
+
+export interface GateOptions {
+  botName: string;
+  repository: string;
+  skipLabel: string;
+  reviewDrafts: boolean;
+  allowBots: string[];
+  disabled: boolean;
+}
+
+export interface GateDeps {
+  fetchPullRequest: (number: number) => Payload | null;
+}
+
+export interface GatePr {
+  number: number;
+  headSha: string;
+  labels: string[];
+  title: string;
+  body: string;
+}
+
+export type GateDecision =
+  | { mode: 'skip'; reason: string }
+  | { mode: 'review'; pr: GatePr; onDemand?: boolean }
+  | { mode: 'convo'; pr: GatePr; convo: { rootId: number } };
+
+const skip = (reason: string): GateDecision => ({ mode: 'skip', reason });
+
+function normalizeBotLogin(login: string): string {
   return login.replace(/\[bot\]$/, '');
 }
 
-function labelNames(labels) {
+function labelNames(labels: { name: string }[] | undefined): string[] {
   return (labels ?? []).map((label) => label.name);
 }
 
@@ -44,22 +78,13 @@ function labelNames(labels) {
  * itself is a fork of something, which is true for every in-repo PR on a
  * forked repository. A deleted head repo (null) is treated as cross-repo.
  */
-function isCrossRepo(pr, repository) {
+function isCrossRepo(pr: Payload, repository: string): boolean {
   const headRepo = pr.head?.repo?.full_name;
   const baseRepo = pr.base?.repo?.full_name ?? repository;
   return !headRepo || headRepo !== baseRepo;
 }
 
-/**
- * @param {{name: string, payload: any}} event
- * @param {{botName: string, repository: string, skipLabel: string,
- *   reviewDrafts: boolean, allowBots: string[], disabled: boolean}} options
- * @param {{fetchPullRequest: (number: number) => any}} deps
- * @returns {{mode: 'review' | 'convo' | 'skip', reason?: string,
- *   pr?: {number: number, headSha: string, labels: string[], title: string, body: string},
- *   convo?: {rootId: number}, onDemand?: boolean}}
- */
-export function decide(event, options, deps) {
+export function decide(event: GateEvent, options: GateOptions, deps: GateDeps): GateDecision {
   const { name, payload } = event;
   const { botName, repository, skipLabel, reviewDrafts, allowBots, disabled } = options;
 
@@ -73,16 +98,12 @@ export function decide(event, options, deps) {
     }
   }
 
-  const shapePr = (pr, extra = {}) => ({
-    mode: 'review',
-    pr: {
-      number: pr.number,
-      headSha: pr.head.sha,
-      labels: labelNames(pr.labels),
-      title: pr.title ?? '',
-      body: pr.body ?? '',
-    },
-    ...extra,
+  const shapePr = (pr: Payload): GatePr => ({
+    number: pr.number,
+    headSha: pr.head.sha,
+    labels: labelNames(pr.labels),
+    title: pr.title ?? '',
+    body: pr.body ?? '',
   });
 
   if (name === 'pull_request') {
@@ -100,7 +121,7 @@ export function decide(event, options, deps) {
     if (labelNames(pr.labels).includes(skipLabel)) {
       return skip(`skip label present (${skipLabel})`);
     }
-    return shapePr(pr);
+    return { mode: 'review', pr: shapePr(pr) };
   }
 
   if (name === 'issue_comment') {
@@ -118,7 +139,7 @@ export function decide(event, options, deps) {
     if (isCrossRepo(pr, repository)) return skip('cross-repository PR (secrets unavailable)');
     // An explicit command is a stronger signal than the standing skip label
     // or draft state, so it overrides both.
-    return shapePr(pr, { onDemand: true });
+    return { mode: 'review', pr: shapePr(pr), onDemand: true };
   }
 
   if (name === 'pull_request_review_comment') {
@@ -133,7 +154,7 @@ export function decide(event, options, deps) {
     if (labelNames(pr.labels).includes(skipLabel)) {
       return skip(`skip label present (${skipLabel})`);
     }
-    return { ...shapePr(pr), mode: 'convo', convo: { rootId: comment.in_reply_to_id } };
+    return { mode: 'convo', pr: shapePr(pr), convo: { rootId: comment.in_reply_to_id } };
   }
 
   return skip(`unsupported event: ${name}`);
@@ -142,34 +163,32 @@ export function decide(event, options, deps) {
 /**
  * Pick the model: the pavo:deep label forces a deep review regardless of
  * the configured default.
- * @param {string} configuredModel
- * @param {string[]} labels
- * @returns {string}
  */
-export function resolveModel(configuredModel, labels) {
+export function resolveModel(configuredModel: string, labels: string[]): string {
   return labels.includes(DEEP_LABEL) ? 'opus' : configuredModel;
 }
 
-function fetchRepoFile(repository, filePath) {
-  const file = ghJson(['api', `repos/${repository}/contents/${filePath}`], {
-    allowFailure: true,
-  });
+function fetchRepoFile(repository: string, filePath: string): string | null {
+  const file = ghJson<{ content?: string }>(
+    ['api', `repos/${repository}/contents/${filePath}`],
+    { allowFailure: true },
+  );
   if (!file?.content) return null;
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
 
-function fetchRepoConfig(repository) {
+function fetchRepoConfig(repository: string): RepoConfig | null {
   const raw = fetchRepoFile(repository, '.github/pavo.json');
   if (raw === null) return null;
   try {
-    return JSON.parse(raw);
+    return JSON.parse(raw) as RepoConfig;
   } catch (cause) {
     throw new Error('.github/pavo.json is not valid JSON', { cause });
   }
 }
 
-function main() {
-  const payload = JSON.parse(fs.readFileSync(requireEnv('GITHUB_EVENT_PATH'), 'utf8'));
+function main(): void {
+  const payload = JSON.parse(fs.readFileSync(requireEnv('GITHUB_EVENT_PATH'), 'utf8')) as Payload;
   const eventName = requireEnv('GITHUB_EVENT_NAME');
   const repository = requireEnv('GITHUB_REPOSITORY');
   const appSlug = requireEnv('APP_SLUG');
@@ -188,7 +207,7 @@ function main() {
   // The repo config can flip review_drafts, so it must be known before the
   // draft check — but only draft PRs need it that early. Everything else
   // fetches lazily after the (cheap) decision.
-  let repoConfig = null;
+  let repoConfig: RepoConfig | null = null;
   let configFetched = false;
   if (eventName === 'pull_request' && payload.pull_request?.draft === true) {
     repoConfig = fetchRepoConfig(repository);
@@ -229,11 +248,11 @@ function main() {
 
   const outDir = requireEnv('OUT_DIR');
   fs.mkdirSync(outDir, { recursive: true });
-  const sideFiles = {};
+  const sideFiles: Record<string, string> = {};
   for (const [key, filePath] of [
     ['repo_context_file', '.github/pavo.md'],
     ['learnings_file', '.github/pavo-learnings.md'],
-  ]) {
+  ] as const) {
     const content = fetchRepoFile(repository, filePath);
     if (content === null) {
       sideFiles[key] = '';
@@ -251,8 +270,8 @@ function main() {
     head_sha: decision.pr.headSha,
     pr_title: decision.pr.title,
     pr_body: body.length > PR_BODY_LIMIT ? `${body.slice(0, PR_BODY_LIMIT)}…(truncated)` : body,
-    on_demand: decision.onDemand ? 'true' : 'false',
-    root_id: decision.convo ? String(decision.convo.rootId) : '',
+    on_demand: decision.mode === 'review' && decision.onDemand ? 'true' : 'false',
+    root_id: decision.mode === 'convo' ? String(decision.convo.rootId) : '',
     model,
     config: JSON.stringify({ ...config, model }),
     ...sideFiles,

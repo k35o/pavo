@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parsePatchLines } from '../scripts/lib/patch.mjs';
+import { parsePatchLines } from '../scripts/lib/patch.ts';
 import {
   buildReviewBody,
   decideEvent,
   partitionComments,
   renderCommentBody,
-} from '../scripts/post-review.mjs';
+} from '../scripts/post-review.ts';
+import type { PavoConfig, ReviewFinding } from '../scripts/lib/types.ts';
 
-const CONFIG = { ignore: ['*.lock'], minSeverity: 'suggestion', approve: true };
+const CONFIG: Pick<PavoConfig, 'ignore' | 'minSeverity' | 'approve'> = {
+  ignore: ['*.lock'],
+  minSeverity: 'suggestion',
+  approve: true,
+};
 
 const PATCH = ['@@ -1,2 +1,3 @@', ' const a = 1;', '+const b = 2;', ' export {};'].join('\n');
 const FILES = new Map([
@@ -17,7 +22,7 @@ const FILES = new Map([
   ['src/nopatch.bin', null],
 ]);
 
-const comment = (overrides = {}) => ({
+const comment = (overrides: Partial<ReviewFinding> = {}): ReviewFinding => ({
   path: 'src/a.ts',
   line: 2,
   side: 'RIGHT',
@@ -34,18 +39,18 @@ test('confidence 80 未満は drop（praise は対象外）', () => {
     FILES,
   );
   assert.equal(inline.length, 1);
-  assert.equal(inline[0].severity, 'praise');
+  assert.equal(inline[0]!.severity, 'praise');
   assert.equal(dropped.length, 1);
-  assert.match(dropped[0].reason, /confidence/);
+  assert.match(dropped[0]!.reason, /confidence/);
 });
 
 test('ignore glob に一致する path は drop', () => {
   const { dropped } = partitionComments([comment({ path: 'pnpm.lock' })], CONFIG, FILES);
-  assert.equal(dropped[0].reason, 'ignored path');
+  assert.equal(dropped[0]!.reason, 'ignored path');
 });
 
 test('min_severity 未満は demote され、diff 外のアンカーも demote される', () => {
-  const config = { ...CONFIG, minSeverity: 'warning' };
+  const config: typeof CONFIG = { ...CONFIG, minSeverity: 'warning' };
   const { inline, demoted } = partitionComments(
     [
       comment({ severity: 'suggestion' }),

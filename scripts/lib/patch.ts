@@ -2,14 +2,15 @@
 // into commentable line maps, so review comments can be validated before
 // POST /pulls/{n}/reviews — one bad anchor 422s the whole review.
 
-/**
- * @param {string} patch unified diff hunks for a single file
- * @returns {{right: Map<number, number>, left: Map<number, number>}}
- *   line number -> hunk index, for each diff side
- */
-export function parsePatchLines(patch) {
-  const right = new Map();
-  const left = new Map();
+/** line number -> hunk index, for each diff side */
+export interface PatchLines {
+  right: Map<number, number>;
+  left: Map<number, number>;
+}
+
+export function parsePatchLines(patch: string | null | undefined): PatchLines {
+  const right = new Map<number, number>();
+  const left = new Map<number, number>();
   if (!patch) return { right, left };
 
   let oldLine = 0;
@@ -42,19 +43,24 @@ export function parsePatchLines(patch) {
   return { right, left };
 }
 
+export interface AnchorCandidate {
+  line: number;
+  side?: string | undefined;
+  start_line?: number | null | undefined;
+  start_side?: string | null | undefined;
+}
+
 /**
  * Check that a review comment anchor exists in the file's diff, including
  * the multi-line case (start_line and line must land in the same hunk).
  *
- * @param {{line: number, side?: string, start_line?: number, start_side?: string}} comment
- * @param {{right: Map<number, number>, left: Map<number, number>} | null} lines
- *   null when the file has no parseable patch (binary / too large) — then the
- *   anchor cannot be verified and is treated as valid.
- * @returns {boolean}
+ * @param lines null when the file has no parseable patch (binary / too
+ *   large) — then the anchor cannot be verified and is treated as valid.
  */
-export function isValidAnchor(comment, lines) {
+export function isValidAnchor(comment: AnchorCandidate, lines: PatchLines | null): boolean {
   if (!lines) return true;
-  const sideMap = (side) => ((side ?? 'RIGHT') === 'LEFT' ? lines.left : lines.right);
+  const sideMap = (side: string | null | undefined): Map<number, number> =>
+    (side ?? 'RIGHT') === 'LEFT' ? lines.left : lines.right;
 
   const endHunk = sideMap(comment.side).get(comment.line);
   if (endHunk === undefined) return false;

@@ -2,18 +2,25 @@
 // recent PR. The output is the feedback loop for tuning instructions/*.md —
 // without it, viewpoint edits are guesswork.
 //
-// Usage: REPO=owner/name BOT_NAME='k35o-bot[bot]' node scripts/report-metrics.mjs
+// Usage: REPO=owner/name BOT_NAME='k35o-bot[bot]' node scripts/report-metrics.ts
 // Optional env: PR_LIMIT (default 20)
 
 import process from 'node:process';
 
-import { addStepSummary } from './lib/actions.mjs';
-import { sameLogin } from './lib/bot.mjs';
-import { ghGraphql, ghJson } from './lib/gh.mjs';
-import { requireEnv } from './env.mjs';
+import { addStepSummary } from './lib/actions.ts';
+import { sameLogin } from './lib/bot.ts';
+import { ghGraphql, ghJson } from './lib/gh.ts';
+import { requireEnv } from './env.ts';
 
-function fetchThreadStats(repo, prNumber, botName) {
-  const [owner, name] = repo.split('/');
+interface ThreadStats {
+  threads: number;
+  resolved: number;
+  thumbsUp: number;
+  thumbsDown: number;
+}
+
+function fetchThreadStats(repo: string, prNumber: number, botName: string): ThreadStats {
+  const [owner, name] = repo.split('/') as [string, string];
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -33,10 +40,10 @@ function fetchThreadStats(repo, prNumber, botName) {
         }
       }
     }`;
-  const stats = { threads: 0, resolved: 0, thumbsUp: 0, thumbsDown: 0 };
-  let cursor = null;
+  const stats: ThreadStats = { threads: 0, resolved: 0, thumbsUp: 0, thumbsDown: 0 };
+  let cursor: string | null = null;
   for (let page = 0; page < 10; page += 1) {
-    const data = ghGraphql(query, {
+    const data: any = ghGraphql(query, {
       owner,
       name,
       number: prNumber,
@@ -59,18 +66,18 @@ function fetchThreadStats(repo, prNumber, botName) {
   return stats;
 }
 
-function main() {
+function main(): void {
   const repo = requireEnv('REPO');
   const botName = requireEnv('BOT_NAME');
   const limit = Number(process.env.PR_LIMIT ?? 20);
 
-  const prs = ghJson([
+  const prs = ghJson<any[]>([
     'api',
     `repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=${limit}`,
   ]);
 
-  const rows = [];
-  const total = { threads: 0, resolved: 0, thumbsUp: 0, thumbsDown: 0 };
+  const rows: string[] = [];
+  const total: ThreadStats = { threads: 0, resolved: 0, thumbsUp: 0, thumbsDown: 0 };
   for (const pr of prs) {
     const stats = fetchThreadStats(repo, pr.number, botName);
     if (stats.threads === 0) continue;

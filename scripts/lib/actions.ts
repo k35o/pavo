@@ -6,9 +6,8 @@ import { randomBytes } from 'node:crypto';
 /**
  * Append step outputs to $GITHUB_OUTPUT. Multiline values use a random
  * heredoc delimiter so bodies cannot terminate the block early.
- * @param {Record<string, string>} outputs
  */
-export function setOutputs(outputs) {
+export function setOutputs(outputs: Record<string, string>): void {
   const file = process.env.GITHUB_OUTPUT;
   if (!file) {
     for (const [key, value] of Object.entries(outputs)) {
@@ -28,24 +27,21 @@ export function setOutputs(outputs) {
   fs.appendFileSync(file, content);
 }
 
-/**
- * Append a Markdown fragment to the job summary, if available.
- * @param {string} markdown
- */
-export function addStepSummary(markdown) {
+/** Append a Markdown fragment to the job summary, if available. */
+export function addStepSummary(markdown: string): void {
   const file = process.env.GITHUB_STEP_SUMMARY;
   if (!file) return;
   fs.appendFileSync(file, `${markdown}\n`);
 }
 
-export function notice(message) {
+export function notice(message: string): void {
   console.log(`::notice::${message.replaceAll('\n', ' ')}`);
 }
 
-export function warning(message) {
+export function warning(message: string): void {
   console.log(`::warning::${message.replaceAll('\n', ' ')}`);
 }
 
-export function error(message) {
+export function error(message: string): void {
   console.log(`::error::${message.replaceAll('\n', ' ')}`);
 }

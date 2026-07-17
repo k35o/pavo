@@ -24,4 +24,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - run: node --test 'tests/*.test.mjs'
+      # typescript is a dev-only dependency; the action itself runs the .ts
+      # sources directly via Node's built-in type stripping (no build step).
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

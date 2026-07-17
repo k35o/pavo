@@ -5,7 +5,7 @@
 // so `*.lock` matches `sub/dir/x.lock`. A trailing `/` matches the
 // directory and everything under it.
 
-function segmentToRegex(segment) {
+function segmentToRegex(segment: string): string {
   let regex = '';
   for (const char of segment) {
     if (char === '*') regex += '[^/]*';
@@ -15,11 +15,7 @@ function segmentToRegex(segment) {
   return regex;
 }
 
-/**
- * @param {string} pattern
- * @returns {RegExp}
- */
-export function globToRegExp(pattern) {
+export function globToRegExp(pattern: string): RegExp {
   let normalized = pattern.trim();
   if (normalized.endsWith('/')) normalized += '**';
 
@@ -28,7 +24,7 @@ export function globToRegExp(pattern) {
   const segments = normalized.split('/');
   let regex = '^';
   for (let i = 0; i < segments.length; i += 1) {
-    const segment = segments[i];
+    const segment = segments[i]!;
     const isLast = i === segments.length - 1;
     if (segment === '**') {
       regex += isLast ? '.*' : '(?:[^/]+/)*';
@@ -39,25 +35,14 @@ export function globToRegExp(pattern) {
   return new RegExp(`${regex}$`);
 }
 
-/**
- * @param {string} filePath repo-relative path with `/` separators
- * @param {string} pattern
- * @returns {boolean}
- */
-export function matchesGlob(filePath, pattern) {
+/** @param filePath repo-relative path with `/` separators */
+export function matchesGlob(filePath: string, pattern: string): boolean {
   const normalized = pattern.trim();
   if (!normalized) return false;
-  const target = normalized.includes('/')
-    ? filePath
-    : filePath.split('/').at(-1);
+  const target = normalized.includes('/') ? filePath : (filePath.split('/').at(-1) ?? filePath);
   return globToRegExp(normalized).test(target);
 }
 
-/**
- * @param {string} filePath
- * @param {string[]} patterns
- * @returns {boolean}
- */
-export function matchesAnyGlob(filePath, patterns) {
+export function matchesAnyGlob(filePath: string, patterns: string[]): boolean {
   return patterns.some((pattern) => matchesGlob(filePath, pattern));
 }
