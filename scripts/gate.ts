@@ -4,9 +4,11 @@
 // All trigger logic lives here (not in action.yml conditions) so it can be
 // unit-tested against fixture payloads.
 //
-// Repo-side configuration (.github/pavo.json / pavo.md / pavo-learnings.md)
-// is read from the DEFAULT branch, not the PR head: a PR must not be able to
-// weaken the rules it is reviewed under.
+// Repo-side configuration (.github/pavo.json / pavo.md) is read from the
+// DEFAULT branch, not the PR head: a PR must not be able to weaken the rules
+// it is reviewed under. Learnings are the exception — post-reply.ts writes
+// them to the pavo/learnings branch (default branches typically reject direct
+// commits), so they are read from there with a default-branch fallback.
 //
 // Required env: GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, GITHUB_REPOSITORY,
 //   APP_SLUG, OUT_DIR
@@ -169,8 +171,10 @@ export function resolveModel(configuredModel: string, labels: string[]): string 
 }
 
 function fetchRepoFile(repository: string, filePath: string, ref?: string): string | null {
-  const path = ref ? `repos/${repository}/contents/${filePath}?ref=${ref}` : `repos/${repository}/contents/${filePath}`;
-  const file = ghJson<{ content?: string }>(['api', path], { allowFailure: true });
+  const endpoint = ref
+    ? `repos/${repository}/contents/${filePath}?ref=${ref}`
+    : `repos/${repository}/contents/${filePath}`;
+  const file = ghJson<{ content?: string }>(['api', endpoint], { allowFailure: true });
   if (!file?.content) return null;
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
