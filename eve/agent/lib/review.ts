@@ -245,6 +245,13 @@ export async function postReview(options: {
 
   const resolvedCount = await resolveThreads(repo, prNumber, botName, options.resolvedCommentIds);
 
+  // Praise threads require no action by definition, yet repos with
+  // "require conversation resolution" rules treat them as merge blockers.
+  // Resolve them immediately after posting.
+  if (!salvaged) {
+    await resolvePraiseThreads(repo, prNumber, botName, reviewId);
+  }
+
   return {
     reviewId,
     event,
@@ -255,6 +262,26 @@ export async function postReview(options: {
     resolvedCount,
     salvaged,
   };
+}
+
+async function resolvePraiseThreads(
+  repo: string,
+  prNumber: number,
+  botName: string,
+  reviewId: number,
+): Promise<void> {
+  const comments = await paginate<{ id: number; pull_request_review_id?: number; body?: string }>(
+    `/repos/${repo}/pulls/${prNumber}/comments`,
+  );
+  const praiseRootIds = comments
+    .filter(
+      (comment) =>
+        comment.pull_request_review_id === reviewId &&
+        (comment.body ?? '').startsWith(SEVERITY_EMOJI.praise),
+    )
+    .map((comment) => comment.id);
+  if (praiseRootIds.length === 0) return;
+  await resolveThreads(repo, prNumber, botName, praiseRootIds);
 }
 
 async function resolveThreads(
