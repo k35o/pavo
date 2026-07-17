@@ -18,10 +18,18 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { setOutputs, notice, warning } from './lib/actions.mjs';
-import { sameLogin } from './lib/bot.mjs';
-import { ghGraphql, ghJson, ghPaginate } from './lib/gh.mjs';
-import { requireEnv } from './env.mjs';
+import { setOutputs, notice, warning } from './lib/actions.ts';
+import { sameLogin } from './lib/bot.ts';
+import { ghGraphql, ghJson, ghPaginate } from './lib/gh.ts';
+import type {
+  ChangedFileEntry,
+  CompareInfo,
+  ReviewContext,
+  ReviewSummaryEntry,
+  ThreadComment,
+  ThreadSummary,
+} from './lib/types.ts';
+import { requireEnv } from './env.ts';
 
 const BODY_LIMIT = 400;
 const THREAD_LIMIT = 60;
@@ -32,14 +40,17 @@ const COMPARE_FILE_LIMIT = 200;
 
 export const META_MARKER_PATTERN = /<!-- pavo:meta (\{.*?\}) -->/s;
 
-const truncate = (body, limit = BODY_LIMIT) => {
+const truncate = (body: string | null | undefined, limit: number = BODY_LIMIT): string => {
   const text = body ?? '';
   return text.length > limit ? `${text.slice(0, limit)}…(truncated)` : text;
 };
 
-function paginateGraphql(buildQuery, extract) {
-  const nodes = [];
-  let cursor = null;
+function paginateGraphql(
+  buildQuery: (cursor: string | null) => any,
+  extract: (data: any) => { nodes: any[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } },
+): any[] {
+  const nodes: any[] = [];
+  let cursor: string | null = null;
   for (let page = 0; page < 20; page += 1) {
     const data = buildQuery(cursor);
     const connection = extract(data);
@@ -50,7 +61,7 @@ function paginateGraphql(buildQuery, extract) {
   return nodes;
 }
 
-function fetchThreads(owner, name, number) {
+function fetchThreads(owner: string, name: string, number: number): any[] {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -78,7 +89,7 @@ function fetchThreads(owner, name, number) {
   );
 }
 
-function fetchReviews(owner, name, number) {
+function fetchReviews(owner: string, name: string, number: number): any[] {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -96,7 +107,7 @@ function fetchReviews(owner, name, number) {
   );
 }
 
-function fetchIssueComments(owner, name, number) {
+function fetchIssueComments(owner: string, name: string, number: number): any[] {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -115,17 +126,17 @@ function fetchIssueComments(owner, name, number) {
 }
 
 /**
- * @param {any[]} reviews GraphQL review nodes, in submission order
- * @param {string} botName
- * @returns {string | null} head SHA recorded by the newest Pavo review
+ * @param reviews GraphQL review nodes, in submission order
+ * @param botName
+ * @returns head SHA recorded by the newest Pavo review
  */
-export function extractLastReviewedSha(reviews, botName) {
+export function extractLastReviewedSha(reviews: any[], botName: string): string | null {
   for (const review of [...reviews].reverse()) {
     if (!sameLogin(review.author?.login, botName)) continue;
     const match = META_MARKER_PATTERN.exec(review.body ?? '');
     if (!match) continue;
     try {
-      const meta = JSON.parse(match[1]);
+      const meta = JSON.parse(match[1]!);
       if (typeof meta.sha === 'string' && meta.sha) return meta.sha;
     } catch {
       // A corrupted marker only costs us the incremental hint.
@@ -134,8 +145,11 @@ export function extractLastReviewedSha(reviews, botName) {
   return null;
 }
 
-export function summarizeThreads(threads, botName) {
-  const shaped = threads.map((thread) => {
+export function summarizeThreads(
+  threads: any[],
+  botName: string,
+): { threads: ThreadSummary[]; dropped: number } {
+  const shaped: ThreadSummary[] = threads.map((thread) => {
     const comments = thread.comments.nodes;
     const root = comments[0] ?? {};
     return {
@@ -146,7 +160,7 @@ export function summarizeThreads(threads, botName) {
       isOutdated: thread.isOutdated,
       byPavo: sameLogin(root.author?.login, botName),
       repliesTruncated: (thread.comments.totalCount ?? comments.length) > comments.length,
-      comments: comments.map((comment) => ({
+      comments: comments.map((comment: any) => ({
         author: comment.author?.login ?? '?',
         isBot: sameLogin(comment.author?.login, botName),
         body: truncate(comment.body),
@@ -173,7 +187,7 @@ export function summarizeThreads(threads, botName) {
   return { threads: kept, dropped: shaped.length - kept.length };
 }
 
-function fetchChangedSince(repo, base, head) {
+function fetchChangedSince(repo: string, base: string | null, head: string): CompareInfo | null {
   if (!base || base === head) return null;
   const compare = ghJson(['api', `repos/${repo}/compare/${base}...${head}`], {
     allowFailure: true,
@@ -183,14 +197,14 @@ function fetchChangedSince(repo, base, head) {
     baseSha: base,
     files: compare.files
       .slice(0, COMPARE_FILE_LIMIT)
-      .map((file) => ({ filename: file.filename, status: file.status })),
+      .map((file: any) => ({ filename: file.filename, status: file.status })),
     truncated: compare.files.length > COMPARE_FILE_LIMIT,
   };
 }
 
-function main() {
+function main(): void {
   const repo = requireEnv('REPO');
-  const [owner, name] = repo.split('/');
+  const [owner, name] = repo.split('/') as [string, string];
   const number = Number(requireEnv('PR_NUMBER'));
   const botName = requireEnv('BOT_NAME');
   const headSha = requireEnv('HEAD_SHA');
@@ -198,7 +212,7 @@ function main() {
 
   const rawReviews = fetchReviews(owner, name, number);
   const { threads, dropped } = summarizeThreads(fetchThreads(owner, name, number), botName);
-  const issueComments = fetchIssueComments(owner, name, number)
+  const issueComments: ThreadComment[] = fetchIssueComments(owner, name, number)
     .slice(-ISSUE_COMMENT_LIMIT)
     .map((comment) => ({
       author: comment.author?.login ?? '?',
@@ -208,7 +222,7 @@ function main() {
 
   const lastReviewedSha = extractLastReviewedSha(rawReviews, botName);
   const sameAsLastReview = lastReviewedSha === headSha;
-  let changedSinceLastReview = null;
+  let changedSinceLastReview: CompareInfo | null = null;
   if (lastReviewedSha && !sameAsLastReview) {
     changedSinceLastReview = fetchChangedSince(repo, lastReviewedSha, headSha);
     if (!changedSinceLastReview) {
@@ -216,7 +230,7 @@ function main() {
     }
   }
 
-  const reviews = rawReviews.slice(-REVIEW_LIMIT).map((review) => ({
+  const reviews: ReviewSummaryEntry[] = rawReviews.slice(-REVIEW_LIMIT).map((review) => ({
     author: review.author?.login ?? '?',
     isBot: sameLogin(review.author?.login, botName),
     state: review.state,
@@ -225,7 +239,7 @@ function main() {
 
   const diffDir = path.join(outDir, 'diff');
   fs.mkdirSync(diffDir, { recursive: true });
-  const changedFiles = [];
+  const changedFiles: ChangedFileEntry[] = [];
   for (const file of ghPaginate(`repos/${repo}/pulls/${number}/files`)) {
     changedFiles.push({
       filename: file.filename,
@@ -241,7 +255,7 @@ function main() {
     fs.writeFileSync(target, `${file.patch}\n`);
   }
 
-  const context = {
+  const context: ReviewContext = {
     botName,
     threads,
     droppedThreads: dropped,

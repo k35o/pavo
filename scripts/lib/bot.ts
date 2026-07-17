@@ -4,13 +4,8 @@
 // the bare `slug` — comparing either side against the other verbatim silently
 // never matches. Normalize both sides instead.
 
-/**
- * @param {string | null | undefined} a
- * @param {string | null | undefined} b
- * @returns {boolean}
- */
-export function sameLogin(a, b) {
+export function sameLogin(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
-  const strip = (login) => login.replace(/\[bot\]$/, '');
+  const strip = (login: string): string => login.replace(/\[bot\]$/, '');
   return strip(a) === strip(b);
 }

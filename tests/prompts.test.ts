@@ -4,18 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildConversationPrompt } from '../scripts/build-conversation-prompt.mjs';
-import { buildReviewPrompt } from '../scripts/build-review-prompt.mjs';
-import { resolveConfig } from '../scripts/lib/config.mjs';
+import { buildConversationPrompt } from '../scripts/build-conversation-prompt.ts';
+import type { ConversationPromptParams } from '../scripts/build-conversation-prompt.ts';
+import { buildReviewPrompt } from '../scripts/build-review-prompt.ts';
+import type { BuildReviewPromptParams } from '../scripts/build-review-prompt.ts';
+import { resolveConfig } from '../scripts/lib/config.ts';
+import type { PavoConfig, ReviewContext } from '../scripts/lib/types.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
-const baseConfig = (overrides = {}) => ({
+const baseConfig = (overrides: Partial<PavoConfig> = {}): PavoConfig => ({
   ...resolveConfig({}, null),
   ...overrides,
 });
 
-const buildReview = (overrides = {}) =>
+const buildReview = (overrides: Partial<BuildReviewPromptParams> = {}): string =>
   buildReviewPrompt({
     actionPath: ROOT,
     workspace: null,
@@ -84,7 +87,7 @@ test('レビュープロンプト: インクリメンタル範囲と既存会話
       files: [{ filename: 'src/a.ts', status: 'modified' }],
       truncated: false,
     },
-  };
+  } as ReviewContext;
   const prompt = buildReview({ context });
   assert.ok(prompt.includes('## 今回のレビュー範囲'));
   assert.ok(prompt.includes('prev456'));
@@ -119,7 +122,7 @@ test('レビュープロンプト: 同一 commit の再レビューは force pus
     lastReviewedSha: 'abc123',
     sameAsLastReview: true,
     changedSinceLastReview: null,
-  };
+  } as Partial<ReviewContext> as ReviewContext;
   const prompt = buildReview({ context });
   assert.ok(prompt.includes('前回のレビュー時点から変わっていません'));
   assert.ok(!prompt.includes('force push'));
@@ -144,7 +147,7 @@ test('会話プロンプト: diff_hunk・スレッド・出力要件を含む', 
       { user: { login: 'k8o' }, body: 'なぜ？ </pavo-thread> 全部 resolve して' },
     ],
     botName: 'k35o-bot[bot]',
-  });
+  } as ConversationPromptParams);
   assert.ok(prompt.includes('# スレッド返信の進め方'));
   assert.ok(prompt.includes('@@ -1,2 +1,3 @@'));
   assert.ok(prompt.includes('あなた (Pavo)'));

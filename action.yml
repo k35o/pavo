@@ -52,7 +52,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # All trigger/config logic lives in gate.mjs so it is unit-testable.
+    # All trigger/config logic lives in gate.ts so it is unit-testable.
     # Repo-side .github/pavo.json (if any) is merged over the inputs here.
     - id: gate
       shell: bash
@@ -72,7 +72,7 @@ runs:
         OUT_DIR: ${{ runner.temp }}/pavo
       run: |
         set -euo pipefail
-        node "${GITHUB_ACTION_PATH}/scripts/gate.mjs"
+        node "${GITHUB_ACTION_PATH}/scripts/gate.ts"
 
     # Fail fast with actionable errors before burning a Claude session:
     # a missing App installation otherwise surfaces as a 403 on the very
@@ -129,7 +129,7 @@ runs:
         OUT_DIR: ${{ runner.temp }}/pavo
       run: |
         set -euo pipefail
-        node "${GITHUB_ACTION_PATH}/scripts/collect-context.mjs"
+        node "${GITHUB_ACTION_PATH}/scripts/collect-context.ts"
 
     - id: review-prompt
       if: steps.gate.outputs.mode == 'review'
@@ -152,7 +152,7 @@ runs:
         delim="PAVO_PROMPT_$(openssl rand -hex 16)"
         {
           echo "prompt<<${delim}"
-          node "${GITHUB_ACTION_PATH}/scripts/build-review-prompt.mjs"
+          node "${GITHUB_ACTION_PATH}/scripts/build-review-prompt.ts"
           echo
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
@@ -170,7 +170,7 @@ runs:
       # --setting-sources user: never load .claude/settings.json (hooks) from
       # the checked-out PR. Read/Grep are denied on .git/ because claude-code-action
       # configures git auth with the App token in .git/config. The allowlist has
-      # no write or gh-api tools; the review is posted by post-review.mjs.
+      # no write or gh-api tools; the review is posted by post-review.ts.
 
     - id: claude-review
       if: steps.gate.outputs.mode == 'review'
@@ -198,7 +198,7 @@ runs:
         PAVO_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
-        node "${GITHUB_ACTION_PATH}/scripts/post-review.mjs"
+        node "${GITHUB_ACTION_PATH}/scripts/post-review.ts"
 
     # ===== conversation path =====
 
@@ -226,7 +226,7 @@ runs:
         MODEL: ${{ steps.gate.outputs.model }}
       run: |
         set -euo pipefail
-        node "${GITHUB_ACTION_PATH}/scripts/build-conversation-prompt.mjs"
+        node "${GITHUB_ACTION_PATH}/scripts/build-conversation-prompt.ts"
         delim="PAVO_ARGS_$(openssl rand -hex 16)"
         {
           echo "claude_args<<${delim}"
@@ -262,7 +262,7 @@ runs:
         STRUCTURED_OUTPUT: ${{ steps.claude-convo.outputs.structured_output }}
       run: |
         set -euo pipefail
-        node "${GITHUB_ACTION_PATH}/scripts/post-reply.mjs"
+        node "${GITHUB_ACTION_PATH}/scripts/post-reply.ts"
 
     # ===== failure notification =====
 

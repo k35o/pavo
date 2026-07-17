@@ -1,6 +1,6 @@
 # Weekly feedback loop: how many Pavo findings got resolved / reacted to.
 # The numbers are the evidence base for tuning instructions/*.md.
-# For other repos, run scripts/report-metrics.mjs manually with REPO/BOT_NAME.
+# For other repos, run scripts/report-metrics.ts manually with REPO/BOT_NAME.
 name: Metrics
 
 on:
@@ -32,4 +32,4 @@ jobs:
           BOT_NAME: ${{ steps.app-token.outputs.app-slug }}[bot]
         run: |
           set -euo pipefail
-          node scripts/report-metrics.mjs
+          node scripts/report-metrics.ts

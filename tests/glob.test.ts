@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { matchesAnyGlob, matchesGlob } from '../scripts/lib/glob.mjs';
+import { matchesAnyGlob, matchesGlob } from '../scripts/lib/glob.ts';
 
 test('スラッシュなしのパターンは basename にマッチする', () => {
   assert.ok(matchesGlob('sub/dir/pnpm-lock.yaml', 'pnpm-lock.yaml'));

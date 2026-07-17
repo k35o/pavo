@@ -35,7 +35,7 @@ jobs:
         Pavo 自身のリポジトリです。GitHub composite action と AI レビュー観点 Markdown、
         プロンプト生成・レビュー投稿用の Node.js スクリプトで構成されています。
         - `action.yml` の step 条件・secret/token の扱い
-        - `scripts/*.mjs` の堅牢性（gh 呼び出しの失敗処理、エスケープ、境界値）
+        - `scripts/*.ts` の堅牢性（gh 呼び出しの失敗処理、エスケープ、境界値）
         - `instructions/*.md` のレビュー観点としての一貫性・抜け漏れ
         - `instructions/index.json` の依存関係定義
         を中心に確認してください。

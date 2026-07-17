@@ -12,19 +12,20 @@
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { addStepSummary, notice, warning } from './lib/actions.mjs';
-import { sameLogin } from './lib/bot.mjs';
-import { severityRank } from './lib/config.mjs';
-import { gh, ghGraphql, ghJson, ghPaginate } from './lib/gh.mjs';
-import { matchesAnyGlob } from './lib/glob.mjs';
-import { isValidAnchor, parsePatchLines } from './lib/patch.mjs';
-import { requireEnv } from './env.mjs';
+import { addStepSummary, notice, warning } from './lib/actions.ts';
+import { sameLogin } from './lib/bot.ts';
+import { severityRank } from './lib/config.ts';
+import { gh, ghGraphql, ghJson, ghPaginate } from './lib/gh.ts';
+import { matchesAnyGlob } from './lib/glob.ts';
+import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts';
+import { requireEnv } from './env.ts';
+import type { PavoConfig, ReviewFinding, Severity } from './lib/types.ts';
 
 const CONFIDENCE_THRESHOLD = 80;
 const REVIEW_BODY_LIMIT = 60000;
 const RESOLVE_LIMIT = 20;
 
-export const SEVERITY_EMOJI = {
+export const SEVERITY_EMOJI: Record<Severity, string> = {
   critical: '🔴',
   warning: '🟡',
   suggestion: '🔵',
@@ -33,10 +34,12 @@ export const SEVERITY_EMOJI = {
 
 /**
  * Render one inline comment body: emoji prefix plus optional suggestion fence.
- * @param {{severity: string, body: string, suggestion?: string}} comment
- * @returns {string}
  */
-export function renderCommentBody(comment) {
+export function renderCommentBody(comment: {
+  severity: Severity;
+  body: string;
+  suggestion?: string;
+}): string {
   let body = `${SEVERITY_EMOJI[comment.severity]} ${comment.body.trim()}`;
   if (comment.suggestion) {
     // A suggestion containing a triple-backtick fence needs a longer outer fence.
@@ -49,27 +52,31 @@ export function renderCommentBody(comment) {
 /**
  * Filter and split raw findings into inline comments and demoted notes.
  *
- * @param {Array<Record<string, any>>} rawComments
- * @param {{ignore: string[], minSeverity: string}} config
- * @param {Map<string, {right: Map<number, number>, left: Map<number, number>} | null>} fileLines
- *   per-path commentable lines; a missing path means the file is not in the diff
- * @returns {{inline: any[], demoted: {comment: any, reason: string}[],
- *   dropped: {comment: any, reason: string}[]}}
+ * @param fileLines per-path commentable lines; a missing path means the file
+ *   is not in the diff
  */
-export function partitionComments(rawComments, config, fileLines) {
-  const inline = [];
-  const demoted = [];
-  const dropped = [];
+export function partitionComments(
+  rawComments: Record<string, any>[] | null | undefined,
+  config: { ignore: string[]; minSeverity: string },
+  fileLines: Map<string, PatchLines | null>,
+): {
+  inline: ReviewFinding[];
+  demoted: { comment: ReviewFinding; reason: string }[];
+  dropped: { comment: ReviewFinding; reason: string }[];
+} {
+  const inline: ReviewFinding[] = [];
+  const demoted: { comment: ReviewFinding; reason: string }[] = [];
+  const dropped: { comment: ReviewFinding; reason: string }[] = [];
   const threshold = severityRank(config.minSeverity);
 
   for (const raw of rawComments ?? []) {
-    const comment = {
+    const comment: ReviewFinding = {
       path: String(raw.path ?? ''),
       line: Number(raw.line),
       side: raw.side === 'LEFT' ? 'LEFT' : 'RIGHT',
       start_line: raw.start_line == null ? undefined : Number(raw.start_line),
       start_side: raw.start_side === 'LEFT' ? 'LEFT' : raw.start_side === 'RIGHT' ? 'RIGHT' : undefined,
-      severity: String(raw.severity ?? 'suggestion'),
+      severity: String(raw.severity ?? 'suggestion') as Severity,
       confidence: Number(raw.confidence ?? 0),
       body: String(raw.body ?? '').trim(),
       suggestion: raw.suggestion ? String(raw.suggestion) : undefined,
@@ -102,7 +109,7 @@ export function partitionComments(rawComments, config, fileLines) {
       demoted.push({ comment, reason: 'file not in diff' });
       continue;
     }
-    if (!isValidAnchor(comment, fileLines.get(comment.path))) {
+    if (!isValidAnchor(comment, fileLines.get(comment.path) ?? null)) {
       demoted.push({ comment, reason: 'line not in diff hunks' });
       continue;
     }
@@ -112,13 +119,14 @@ export function partitionComments(rawComments, config, fileLines) {
 }
 
 /**
- * @param {string} verdict
- * @param {any[]} inline kept inline comments
- * @param {{comment: any}[]} demoted
- * @param {{approve: boolean}} config
- * @returns {'APPROVE' | 'COMMENT'}
+ * @param inline kept inline comments
  */
-export function decideEvent(verdict, inline, demoted, config) {
+export function decideEvent(
+  verdict: string,
+  inline: ReviewFinding[],
+  demoted: { comment: ReviewFinding }[],
+  config: { approve: boolean },
+): 'APPROVE' | 'COMMENT' {
   if (!config.approve || verdict !== 'approve') return 'COMMENT';
   const blocking = [...inline, ...demoted.map((entry) => entry.comment)].some((comment) =>
     ['critical', 'warning'].includes(comment.severity),
@@ -127,9 +135,17 @@ export function decideEvent(verdict, inline, demoted, config) {
 }
 
 /**
- * @returns {string} final review body with demoted notes and the meta marker
+ * @returns final review body with demoted notes and the meta marker
  */
-export function buildReviewBody({ summary, demoted, meta }) {
+export function buildReviewBody({
+  summary,
+  demoted,
+  meta,
+}: {
+  summary: string;
+  demoted: { comment: ReviewFinding; reason: string }[];
+  meta: Record<string, string>;
+}): string {
   let body = summary.trim();
   if (demoted.length > 0) {
     const items = demoted
@@ -149,22 +165,27 @@ export function buildReviewBody({ summary, demoted, meta }) {
   return `${body}\n\n<!-- pavo:meta ${JSON.stringify(meta)} -->`;
 }
 
-function fetchFileLines(repo, prNumber) {
+function fetchFileLines(repo: string, prNumber: string): Map<string, PatchLines | null> {
   const files = ghPaginate(`repos/${repo}/pulls/${prNumber}/files`);
-  const map = new Map();
+  const map = new Map<string, PatchLines | null>();
   for (const file of files) {
     map.set(file.filename, file.patch ? parsePatchLines(file.patch) : null);
   }
   return map;
 }
 
-function postReview(repo, prNumber, payload) {
+function postReview(repo: string, prNumber: string, payload: unknown): any {
   return ghJson(['api', '--method', 'POST', `repos/${repo}/pulls/${prNumber}/reviews`, '--input', '-'], {
     input: JSON.stringify(payload),
   });
 }
 
-function dismissStaleApprovals(repo, prNumber, botName, keepReviewId) {
+function dismissStaleApprovals(
+  repo: string,
+  prNumber: string,
+  botName: string,
+  keepReviewId: number,
+): void {
   const reviews = ghPaginate(`repos/${repo}/pulls/${prNumber}/reviews`);
   for (const review of reviews) {
     if (review.user?.login !== botName) continue;
@@ -188,9 +209,14 @@ function dismissStaleApprovals(repo, prNumber, botName, keepReviewId) {
   }
 }
 
-function resolveThreads(repo, prNumber, botName, rootIds) {
+function resolveThreads(
+  repo: string,
+  prNumber: string,
+  botName: string,
+  rootIds: number[] | null | undefined,
+): number {
   if (!rootIds?.length) return 0;
-  const [owner, name] = repo.split('/');
+  const [owner, name] = repo.split('/') as [string, string];
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -208,9 +234,9 @@ function resolveThreads(repo, prNumber, botName, rootIds) {
     }`;
   const wanted = new Set(rootIds.slice(0, RESOLVE_LIMIT).map(Number));
   let resolvedCount = 0;
-  let cursor = null;
+  let cursor: string | null = null;
   for (let page = 0; page < 10; page += 1) {
-    const data = ghGraphql(query, {
+    const data: any = ghGraphql(query, {
       owner,
       name,
       number: Number(prNumber),
@@ -229,7 +255,7 @@ function resolveThreads(repo, prNumber, botName, rootIds) {
         );
         resolvedCount += 1;
       } catch (error) {
-        warning(`Failed to resolve thread ${thread.id}: ${error.message}`);
+        warning(`Failed to resolve thread ${thread.id}: ${(error as Error).message}`);
       }
     }
     if (!connection.pageInfo.hasNextPage) break;
@@ -238,12 +264,12 @@ function resolveThreads(repo, prNumber, botName, rootIds) {
   return resolvedCount;
 }
 
-function main() {
+function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
   const headSha = requireEnv('HEAD_SHA');
   const botName = requireEnv('BOT_NAME');
-  const config = JSON.parse(requireEnv('CONFIG'));
+  const config = JSON.parse(requireEnv('CONFIG')) as PavoConfig;
   const output = JSON.parse(requireEnv('STRUCTURED_OUTPUT'));
 
   if (typeof output.summary !== 'string' || !output.summary.trim()) {
@@ -286,7 +312,7 @@ function main() {
   } catch (error) {
     // A single rejected anchor 422s the whole review. Salvage everything into
     // the body rather than losing the review (and the dismissed APPROVE) entirely.
-    warning(`Review POST failed (${error.message}); retrying with all comments in the body.`);
+    warning(`Review POST failed (${(error as Error).message}); retrying with all comments in the body.`);
     const salvaged = inline.map((comment) => ({ comment, reason: 'inline post failed' }));
     review = postReview(repo, prNumber, {
       commit_id: headSha,

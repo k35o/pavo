@@ -162,9 +162,10 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 ## バージョン管理と CI
 
 - タグやリリース運用は持たず、ブランチか commit SHA で参照する。SHA pin（+ Renovate 追従）が効くのは composite action を直接 `uses: k35o/pavo@<sha>` する場合。reusable workflow 経由は常に `@main` 追従になる
-- [`ci.yml`](.github/workflows/ci.yml) が index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テストを PR ごとに検証する（`node --test`）
+- [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する
+- `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
-- [`metrics.yml`](.github/workflows/metrics.yml) が週次で指摘スレッドの resolve 率・👍/👎 を集計する。任意のリポジトリに対しては `REPO=owner/name BOT_NAME='xxx[bot]' node scripts/report-metrics.mjs` で手動実行できる
+- [`metrics.yml`](.github/workflows/metrics.yml) が週次で指摘スレッドの resolve 率・👍/👎 を集計する。任意のリポジトリに対しては `REPO=owner/name BOT_NAME='xxx[bot]' node scripts/report-metrics.ts` で手動実行できる
 - ラップしている `claude-code-action` は SHA pin。Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
 
 ## セキュリティ
@@ -179,22 +180,22 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 
 ### review path (`pull_request` / `/pavo` / re-request)
 
-1. `gate.mjs` — イベント判定（draft / label / bot / association / kill switch）と設定解決（`.github/pavo.json` > inputs > デフォルト）。全ロジックはユニットテスト済み
+1. `gate.ts` — イベント判定（draft / label / bot / association / kill switch）と設定解決（`.github/pavo.json` > inputs > デフォルト）。全ロジックはユニットテスト済み
 2. プリフライト — bot user の存在・App のインストール・PR 読み取り権限を Claude 実行前に検証（失敗は具体的なエラーで即 fail）
 3. PR head を checkout
-4. `collect-context.mjs` — GraphQL で全スレッド（resolve 状態・人間の返信込み）・レビュー履歴・コメントを収集し、前回レビュー SHA をマーカーから復元、compare API で差分ファイルを特定
-5. `build-review-prompt.mjs` — system + formatting + 観点 + repo 設定 + learnings + 会話コンテキスト + 出力要件を結合
+4. `collect-context.ts` — GraphQL で全スレッド（resolve 状態・人間の返信込み）・レビュー履歴・コメントを収集し、前回レビュー SHA をマーカーから復元、compare API で差分ファイルを特定
+5. `build-review-prompt.ts` — system + formatting + 観点 + repo 設定 + learnings + 会話コンテキスト + 出力要件を結合
 6. `claude-code-action` — 読み取り専用ツールで diff とコードを調査し、`--json-schema` で検証された構造化 JSON（summary / verdict / comments / resolved_comment_ids）を返す
-7. `post-review.mjs` — confidence・ignore・min_severity・アンカー検証でフィルタし、Review を 1 回だけ POST（422 時は本文へ退避して再送）。成功後に古い APPROVE を dismiss、解消済みスレッドを resolve、`$GITHUB_STEP_SUMMARY` にメトリクスを出力
+7. `post-review.ts` — confidence・ignore・min_severity・アンカー検証でフィルタし、Review を 1 回だけ POST（422 時は本文へ退避して再送）。成功後に古い APPROVE を dismiss、解消済みスレッドを resolve、`$GITHUB_STEP_SUMMARY` にメトリクスを出力
 8. 失敗時は PR に「実行が失敗した」コメントと run URL を残す（サイレント失敗しない）
 
 ### conversation path (`pull_request_review_comment`)
 
-1. `gate.mjs` — 返信であること・association を確認
+1. `gate.ts` — 返信であること・association を確認
 2. PR head を checkout
-3. `build-conversation-prompt.mjs` — thread root が自 bot か確認し、スレッド全文 + 対象 diff_hunk + repo コンテキストからプロンプトを構築
+3. `build-conversation-prompt.ts` — thread root が自 bot か確認し、スレッド全文 + 対象 diff_hunk + repo コンテキストからプロンプトを構築
 4. `claude-code-action` — 構造化 JSON（body / resolve_thread / remember）を返す
-5. `post-reply.mjs` — 返信を POST（JSON は stdin 渡しで shell を経由しない）。修正確認済みならスレッドを resolve、`remember` があれば learnings に追記
+5. `post-reply.ts` — 返信を POST（JSON は stdin 渡しで shell を経由しない）。修正確認済みならスレッドを resolve、`remember` があれば learnings に追記
 
 ### dogfooding
 

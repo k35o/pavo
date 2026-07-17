@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_IGNORE, resolveConfig, severityRank } from '../scripts/lib/config.mjs';
+import { DEFAULT_IGNORE, resolveConfig, severityRank } from '../scripts/lib/config.ts';
 
 test('デフォルト値', () => {
   const config = resolveConfig({}, null);

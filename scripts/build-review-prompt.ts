@@ -2,20 +2,20 @@
 //
 // Reads inputs from environment variables and writes the composed prompt to
 // stdout. Claude does NOT post the review itself: it returns a structured
-// JSON result (validated by --json-schema) that post-review.mjs turns into a
+// JSON result (validated by --json-schema) that post-review.ts turns into a
 // GitHub Review deterministically.
 //
 // Required env:
 // - ACTION_PATH: path to pavo repo checkout
 // - REPO, PR_NUMBER
-// - CONFIG: resolved config JSON from gate.mjs
+// - CONFIG: resolved config JSON from gate.ts
 //
 // Optional env:
 // - GITHUB_WORKSPACE: target repo checkout (`./` instructions)
 // - PR_TITLE, PR_BODY, HEAD_SHA
-// - CONTEXT_FILE: path to collect-context.mjs output
+// - CONTEXT_FILE: path to collect-context.ts output
 // - REPO_CONTEXT_FILE / LEARNINGS_FILE: default-branch pavo.md / learnings
-//   fetched by gate.mjs (deliberately NOT the PR head's version)
+//   fetched by gate.ts (deliberately NOT the PR head's version)
 // - ON_DEMAND: 'true' when triggered by an explicit /pavo command
 
 import fs from 'node:fs';
@@ -23,9 +23,10 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { warning } from './lib/actions.mjs';
-import { resolveInstructionFiles } from './lib/instructions.mjs';
-import { requireEnv } from './env.mjs';
+import { warning } from './lib/actions.ts';
+import { resolveInstructionFiles } from './lib/instructions.ts';
+import { requireEnv } from './env.ts';
+import type { PavoConfig, ReviewContext } from './lib/types.ts';
 
 // Inputs (prompt included) travel through env vars, which Linux caps around
 // 128KiB per variable. Stay far enough below that the wrapping YAML and the
@@ -33,12 +34,13 @@ import { requireEnv } from './env.mjs';
 const PROMPT_BYTE_BUDGET = 90000;
 
 // Neutralize閉じタグ偽装: untrusted テキストが自分を囲むフェンスを閉じられないようにする。
-const sanitizeUntrusted = (text) => (text ?? '').replaceAll('</pavo-', '<\\/pavo-');
+const sanitizeUntrusted = (text: string | null | undefined): string =>
+  (text ?? '').replaceAll('</pavo-', '<\\/pavo-');
 
-const readIfExists = (file) =>
+const readIfExists = (file: string): string | null =>
   fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trimEnd() : null;
 
-function languageSection(language) {
+function languageSection(language: PavoConfig['language']): string {
   if (language === 'ja') return '## 出力言語\n\nすべての出力は日本語で書いてください。\n';
   if (language === 'en') return '## 出力言語\n\nすべての出力は英語で書いてください。\n';
   return (
@@ -49,7 +51,7 @@ function languageSection(language) {
   );
 }
 
-function conversationSection(context) {
+function conversationSection(context: ReviewContext | null): string | null {
   if (!context) return null;
   const lines = ['## この PR 上の既存の会話\n'];
   lines.push(
@@ -126,8 +128,8 @@ function conversationSection(context) {
   return lines.join('\n');
 }
 
-function scopeSection(context, onDemand) {
-  const parts = [];
+function scopeSection(context: ReviewContext | null, onDemand: boolean): string | null {
+  const parts: string[] = [];
   if (onDemand) {
     parts.push('この実行はユーザーの明示的な `/pavo review` コマンドによる再レビューです。');
   }
@@ -158,7 +160,7 @@ function scopeSection(context, onDemand) {
   return `## 今回のレビュー範囲\n\n${parts.join('\n\n')}\n`;
 }
 
-function diffFilesSection(context) {
+function diffFilesSection(context: ReviewContext | null): string | null {
   if (!context?.changedFiles?.length) return null;
   const lines = context.changedFiles.map(
     (file) => `- \`${file.filename}\` (${file.status}, +${file.additions}/-${file.deletions})`,
@@ -171,8 +173,23 @@ function diffFilesSection(context) {
   );
 }
 
+export interface BuildReviewPromptParams {
+  actionPath: string;
+  workspace: string | null;
+  config: PavoConfig;
+  repo: string;
+  prNumber: string;
+  prTitle: string;
+  prBody: string;
+  headSha: string;
+  context: ReviewContext | null;
+  onDemand: boolean;
+  repoContextMd?: string | null;
+  learnings?: string | null;
+}
+
 /**
- * @returns {string} the full prompt
+ * @returns the full prompt
  */
 export function buildReviewPrompt({
   actionPath,
@@ -187,8 +204,8 @@ export function buildReviewPrompt({
   onDemand,
   repoContextMd = null,
   learnings = null,
-}) {
-  const sections = [];
+}: BuildReviewPromptParams): string {
+  const sections: string[] = [];
   const instructionsDir = path.join(actionPath, 'instructions');
 
   sections.push(`${fs.readFileSync(path.join(instructionsDir, 'system.md'), 'utf8').trimEnd()}\n`);
@@ -214,7 +231,7 @@ export function buildReviewPrompt({
     sections.push(`${fs.readFileSync(file, 'utf8').trimEnd()}\n`);
   }
 
-  const repoContext = [];
+  const repoContext: string[] = [];
   if (repoContextMd) repoContext.push(repoContextMd.trimEnd());
   if (config.extraPrompt) repoContext.push(config.extraPrompt.trimEnd());
   if (repoContext.length > 0) {
@@ -269,12 +286,12 @@ export function buildReviewPrompt({
   return sections.join('\n---\n\n');
 }
 
-function main() {
+function main(): void {
   const contextFile = process.env.CONTEXT_FILE;
-  const params = {
+  const params: BuildReviewPromptParams = {
     actionPath: requireEnv('ACTION_PATH'),
     workspace: process.env.GITHUB_WORKSPACE || null,
-    config: JSON.parse(requireEnv('CONFIG')),
+    config: JSON.parse(requireEnv('CONFIG')) as PavoConfig,
     repo: requireEnv('REPO'),
     prNumber: requireEnv('PR_NUMBER'),
     prTitle: process.env.PR_TITLE ?? '',
@@ -282,7 +299,7 @@ function main() {
     headSha: process.env.HEAD_SHA ?? '',
     context:
       contextFile && fs.existsSync(contextFile)
-        ? JSON.parse(fs.readFileSync(contextFile, 'utf8'))
+        ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
         : null,
     onDemand: process.env.ON_DEMAND === 'true',
     repoContextMd: process.env.REPO_CONTEXT_FILE
