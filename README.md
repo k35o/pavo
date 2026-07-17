@@ -47,7 +47,7 @@ App token の発行やジョブ構成を自分で制御したい場合は、comp
 | 項目 | 設定 |
 | --- | --- |
 | Repository permissions | `Pull requests: Read & write`, `Contents: Read`（learnings 保存を使うなら `Read & write`）, `Issues: Read & write`, `Metadata: Read` |
-| Subscribe to events | `Pull request`, `Pull request review`, `Pull request review comment`, `Issue comment` |
+| Webhook | 「Active」のチェックを外す（不要）。イベントの受け取りは caller workflow の `on:` が担うため、App の event subscription は使わない |
 
 ### 2. caller repo（または org）に secret を登録
 
