@@ -1,50 +1,34 @@
+# Dogfooding: Pavo's own PRs are reviewed by Pavo.
+#
+# Deliberately `@main`, not `uses: ./` — a PR that edits action.yml or
+# instructions/ must be reviewed by the *current* Pavo, not by the modified
+# version it is trying to introduce (otherwise a PR could weaken the reviewer
+# and then get approved by its own weakened rules). The PR version is
+# exercised by ci.yml instead.
 name: Pavo
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review_comment:
     types: [created]
-
-# Same-PR pushes cancel earlier in-flight reviews so only the latest commit gets reviewed.
-# Group also includes event_name so review jobs and reply jobs don't cancel each other —
-# without this, Pavo posting a review triggers a review_comment event whose run cancels
-# the post-cleanup of the run that just finished, surfacing a false "cancelled" badge.
-concurrency:
-  group: pavo-${{ github.event_name }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  issue_comment:
+    types: [created]
 
 jobs:
   pavo:
-    # Skip on PRs from forks: secrets are not exposed to fork workflows so the App
-    # token step would fail anyway, and we don't want a permanent red Actions run.
-    if: ${{ github.event.pull_request.head.repo.fork != true }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.K35O_BOT_CLIENT_ID }}
-          private-key: ${{ secrets.K35O_BOT_PRIVATE_KEY }}
-
-      # `uses: ./` requires the repo (i.e. action.yml) to be on the workspace.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 1
-
-      - uses: ./
-        with:
-          github_token: ${{ steps.app-token.outputs.token }}
-          app_slug: ${{ steps.app-token.outputs.app-slug }}
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          instructions: default
-          extra_prompt: |
-            Pavo 自身のリポジトリです。GitHub composite action と AI レビュー観点をまとめた Markdown で構成されています。
-            - `action.yml` の YAML 構文・step 条件・secret/token の扱い
-            - `instructions/*.md` のレビュー観点としての一貫性・抜け漏れ
-            - `instructions/index.json` の依存関係定義
-            を中心に確認してください。
+    # Cheap pre-filter so ordinary PR comments don't spin up a runner just to
+    # be skipped by the gate.
+    if: ${{ github.event_name != 'issue_comment' || startsWith(github.event.comment.body, '/pavo') }}
+    uses: k35o/pavo/.github/workflows/review.yml@main
+    with:
+      instructions: default,github-actions,node
+      extra_prompt: |
+        Pavo 自身のリポジトリです。GitHub composite action と AI レビュー観点 Markdown、
+        プロンプト生成・レビュー投稿用の Node.js スクリプトで構成されています。
+        - `action.yml` の step 条件・secret/token の扱い
+        - `scripts/*.mjs` の堅牢性（gh 呼び出しの失敗処理、エスケープ、境界値）
+        - `instructions/*.md` のレビュー観点としての一貫性・抜け漏れ
+        - `instructions/index.json` の依存関係定義
+        を中心に確認してください。
+    secrets: inherit
