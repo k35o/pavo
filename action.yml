@@ -12,7 +12,7 @@ inputs:
     description: 'Claude Code Max OAuth token (claude setup-token).'
     required: true
   instructions:
-    description: 'Comma-separated instruction names. Dependencies are resolved from instructions/index.json.'
+    description: 'Comma-separated instruction names. Dependencies are resolved from instructions/index.json. Entries starting with ./ are read from the target repo.'
     required: false
     default: 'default'
   extra_prompt:
@@ -22,206 +22,260 @@ inputs:
     description: 'PR label that disables this action.'
     required: false
     default: 'pavo:skip'
+  model:
+    description: 'Claude model for reviews. A pavo:deep PR label overrides this to opus.'
+    required: false
+    default: 'sonnet'
+  language:
+    description: 'Review output language: auto (follow the PR description), ja, or en.'
+    required: false
+    default: 'auto'
+  approve:
+    description: 'Allow posting event: APPROVE reviews. Set false to always use COMMENT.'
+    required: false
+    default: 'true'
+  min_severity:
+    description: 'Lowest severity posted as an inline comment (suggestion|warning|critical). Findings below it are collapsed into the review body.'
+    required: false
+    default: 'suggestion'
+  ignore_paths:
+    description: 'Comma-separated globs excluded from review, added to the built-in lockfile/generated-file defaults.'
+    required: false
+  allow_bots:
+    description: 'Comma-separated bot logins (with or without [bot]) whose PRs should be reviewed. Empty = skip all bot-triggered events.'
+    required: false
+  review_drafts:
+    description: 'Review draft PRs too. By default drafts are skipped until ready_for_review.'
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
+    # All trigger/config logic lives in gate.mjs so it is unit-testable.
+    # Repo-side .github/pavo.json (if any) is merged over the inputs here.
     - id: gate
-      shell: bash
-      env:
-        SKIP_LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, inputs.skip_label) }}
-        EVENT_NAME: ${{ github.event_name }}
-        SENDER_TYPE: ${{ github.event.sender.type }}
-        IN_REPLY_TO_ID: ${{ github.event.comment.in_reply_to_id }}
-      run: |
-        set -euo pipefail
-        review=false
-        convo=false
-        if [ "${SKIP_LABEL_PRESENT}" = "false" ] && [ "${SENDER_TYPE}" != "Bot" ]; then
-          if [ "${EVENT_NAME}" = "pull_request" ]; then
-            review=true
-          elif [ "${EVENT_NAME}" = "pull_request_review_comment" ] \
-            && [ -n "${IN_REPLY_TO_ID}" ]; then
-            convo=true
-          fi
-        fi
-        if [ "${review}" = "false" ] && [ "${convo}" = "false" ]; then
-          echo "::notice::Pavo skipped (event=${EVENT_NAME}, sender=${SENDER_TYPE}, skip_label_present=${SKIP_LABEL_PRESENT})"
-        fi
-        echo "review=${review}" >> "$GITHUB_OUTPUT"
-        echo "convo=${convo}" >> "$GITHUB_OUTPUT"
-
-    - id: bot
-      if: steps.gate.outputs.review == 'true' || steps.gate.outputs.convo == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         APP_SLUG: ${{ inputs.app_slug }}
+        SKIP_LABEL: ${{ inputs.skip_label }}
+        INSTRUCTIONS: ${{ inputs.instructions }}
+        EXTRA_PROMPT: ${{ inputs.extra_prompt }}
+        MODEL: ${{ inputs.model }}
+        LANGUAGE: ${{ inputs.language }}
+        APPROVE: ${{ inputs.approve }}
+        MIN_SEVERITY: ${{ inputs.min_severity }}
+        IGNORE_PATHS: ${{ inputs.ignore_paths }}
+        ALLOW_BOTS: ${{ inputs.allow_bots }}
+        REVIEW_DRAFTS: ${{ inputs.review_drafts }}
+        OUT_DIR: ${{ runner.temp }}/pavo
+      run: |
+        set -euo pipefail
+        node "${GITHUB_ACTION_PATH}/scripts/gate.mjs"
+
+    # Fail fast with actionable errors before burning a Claude session:
+    # a missing App installation otherwise surfaces as a 403 on the very
+    # last POST, after the whole review has been generated.
+    - id: bot
+      if: steps.gate.outputs.mode != 'skip'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        APP_SLUG: ${{ inputs.app_slug }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
       run: |
         set -euo pipefail
         name="${APP_SLUG}[bot]"
-        id=$(gh api "/users/${name}" --jq .id)
+        if ! id=$(gh api "/users/${name}" --jq .id); then
+          echo "::error::GitHub App user ${name} not found. app_slug の綴りを確認してください。"
+          exit 1
+        fi
+        if ! gh api "repos/${REPO}" --jq .id > /dev/null; then
+          echo "::error::App token cannot read ${REPO}. GitHub App がこのリポジトリにインストールされているか確認してください。"
+          exit 1
+        fi
+        if ! gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq .id > /dev/null; then
+          echo "::error::App token cannot read PR #${PR_NUMBER}. App の Repository permissions（Pull requests: Read & write）を確認してください。"
+          exit 1
+        fi
         echo "name=${name}" >> "$GITHUB_OUTPUT"
         echo "id=${id}" >> "$GITHUB_OUTPUT"
 
     # ===== review path =====
 
-    - if: steps.gate.outputs.review == 'true'
+    # The head commit (not the transient merge ref): what `gh pr diff` shows,
+    # what Read sees, and what inline comment anchors refer to must all be the
+    # same commit. persist-credentials:false keeps the checkout token out of
+    # .git/config; claude-code-action still writes its own git auth there, so
+    # the claude steps below additionally deny Read on .git/.
+    - if: steps.gate.outputs.mode == 'review'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
+        ref: ${{ steps.gate.outputs.head_sha }}
         fetch-depth: 1
+        persist-credentials: false
 
-    - id: existing
-      if: steps.gate.outputs.review == 'true'
+    - id: context
+      if: steps.gate.outputs.mode == 'review'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         REPO: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
         BOT_NAME: ${{ steps.bot.outputs.name }}
+        HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+        OUT_DIR: ${{ runner.temp }}/pavo
       run: |
         set -euo pipefail
-        inline=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/comments" \
-          | jq --arg bot "${BOT_NAME}" \
-              '[.[] | select(.user.login == $bot) | {path, line, body}]')
-        reviews=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
-          | jq --arg bot "${BOT_NAME}" \
-              '[.[] | select(.user.login == $bot and (.body | length) > 0) | {body}]')
-        issue=$(gh api --paginate "/repos/${REPO}/issues/${PR_NUMBER}/comments" \
-          | jq --arg bot "${BOT_NAME}" \
-              '[.[] | select(.user.login == $bot) | {body}]')
-        delim="EXISTING_$(date +%s%N)"
-        {
-          echo "summary<<${delim}"
-          echo "### inline comments"
-          echo "${inline}"
-          echo "### review summaries"
-          echo "${reviews}"
-          echo "### legacy PR-level comments"
-          echo "${issue}"
-          echo "${delim}"
-        } >> "$GITHUB_OUTPUT"
+        node "${GITHUB_ACTION_PATH}/scripts/collect-context.mjs"
 
     - id: review-prompt
-      if: steps.gate.outputs.review == 'true'
+      if: steps.gate.outputs.mode == 'review'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-        INSTRUCTIONS: ${{ inputs.instructions }}
-        EXTRA_PROMPT: ${{ inputs.extra_prompt }}
+        CONFIG: ${{ steps.gate.outputs.config }}
         REPO: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        PR_BODY: ${{ github.event.pull_request.body }}
-        EXISTING: ${{ steps.existing.outputs.summary }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+        PR_TITLE: ${{ steps.gate.outputs.pr_title }}
+        PR_BODY: ${{ steps.gate.outputs.pr_body }}
+        HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+        CONTEXT_FILE: ${{ steps.context.outputs.context_file }}
+        ON_DEMAND: ${{ steps.gate.outputs.on_demand }}
+        REPO_CONTEXT_FILE: ${{ steps.gate.outputs.repo_context_file }}
+        LEARNINGS_FILE: ${{ steps.gate.outputs.learnings_file }}
+        MODEL: ${{ steps.gate.outputs.model }}
       run: |
         set -euo pipefail
-        delim="PAVO_PROMPT_$(date +%s%N)"
+        delim="PAVO_PROMPT_$(openssl rand -hex 16)"
         {
           echo "prompt<<${delim}"
-          node "${ACTION_PATH}/scripts/build-review-prompt.mjs"
+          node "${GITHUB_ACTION_PATH}/scripts/build-review-prompt.mjs"
           echo
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
+        {
+          echo "claude_args<<${delim}"
+          echo "--model ${MODEL}"
+          echo "--max-turns 60"
+          echo "--setting-sources user"
+          echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
+          echo "--disallowedTools \"Read(./.git/**)\""
+          echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/review.json")'"
+          echo "${delim}"
+        } >> "$GITHUB_OUTPUT"
+      # MODEL comes from gate so the pavo:deep label override applies.
+      # --setting-sources user: never load .claude/settings.json (hooks) from
+      # the checked-out PR. Read(./.git/**) is denied because claude-code-action
+      # configures git auth with the App token in .git/config. The allowlist has
+      # no write or gh-api tools; the review is posted by post-review.mjs.
 
-    # Dismiss any APPROVED reviews this bot left on prior runs so the fresh
-    # review supersedes them. Without this, a stale APPROVE keeps counting
-    # toward branch protection even after a later run finds issues.
-    - if: steps.gate.outputs.review == 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github_token }}
-        REPO: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        BOT_NAME: ${{ steps.bot.outputs.name }}
-      run: |
-        set -euo pipefail
-        ids=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
-          | jq --arg bot "${BOT_NAME}" -r \
-              '.[] | select(.user.login == $bot and .state == "APPROVED") | .id')
-        if [ -z "${ids}" ]; then
-          exit 0
-        fi
-        while IFS= read -r id; do
-          [ -z "${id}" ] && continue
-          echo "Dismissing stale APPROVE review ${id}"
-          gh api --method PUT \
-            "/repos/${REPO}/pulls/${PR_NUMBER}/reviews/${id}/dismissals" \
-            -f message='Superseded by a fresh Pavo review run.' \
-            -f event='DISMISS'
-        done <<< "${ids}"
-
-    - if: steps.gate.outputs.review == 'true'
-      uses: anthropics/claude-code-action@939ae9c056ecf8a1a01409ddd1c4eadec5f8c77b # v1.0.116
+    - id: claude-review
+      if: steps.gate.outputs.mode == 'review'
+      uses: anthropics/claude-code-action@700e7f8316990de46bed556429765647af760efc # v1.0.176
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         github_token: ${{ inputs.github_token }}
         bot_id: ${{ steps.bot.outputs.id }}
         bot_name: ${{ steps.bot.outputs.name }}
+        allowed_bots: ${{ inputs.allow_bots }}
         prompt: ${{ steps.review-prompt.outputs.prompt }}
-        claude_args: |
-          --model sonnet
-          --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+        claude_args: ${{ steps.review-prompt.outputs.claude_args }}
+
+    - if: steps.gate.outputs.mode == 'review'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+        HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+        BOT_NAME: ${{ steps.bot.outputs.name }}
+        CONFIG: ${{ steps.gate.outputs.config }}
+        STRUCTURED_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        PAVO_REF: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        node "${GITHUB_ACTION_PATH}/scripts/post-review.mjs"
 
     # ===== conversation path =====
 
-    - id: thread
-      if: steps.gate.outputs.convo == 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github_token }}
-        REPO: ${{ github.repository }}
-        ROOT_ID: ${{ github.event.comment.in_reply_to_id }}
-        BOT_NAME: ${{ steps.bot.outputs.name }}
-      run: |
-        set -euo pipefail
-        root=$(gh api "/repos/${REPO}/pulls/comments/${ROOT_ID}")
-        user=$(echo "${root}" | jq -r .user.login)
-        if [ "${user}" != "${BOT_NAME}" ]; then
-          echo "::notice::Thread root by ${user}, not ${BOT_NAME}; skipping reply."
-          echo "skip=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-        fi
-
-    - if: steps.thread.outputs.skip == 'false'
+    - if: steps.gate.outputs.mode == 'convo'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
-        ref: ${{ github.event.pull_request.head.sha }}
+        ref: ${{ steps.gate.outputs.head_sha }}
         fetch-depth: 1
+        persist-credentials: false
 
     - id: convo-prompt
-      if: steps.thread.outputs.skip == 'false'
+      if: steps.gate.outputs.mode == 'convo'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         ACTION_PATH: ${{ github.action_path }}
+        CONFIG: ${{ steps.gate.outputs.config }}
         REPO: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        PR_BODY: ${{ github.event.pull_request.body }}
-        ROOT_ID: ${{ github.event.comment.in_reply_to_id }}
-        FILE_PATH: ${{ github.event.comment.path }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+        PR_TITLE: ${{ steps.gate.outputs.pr_title }}
+        PR_BODY: ${{ steps.gate.outputs.pr_body }}
+        ROOT_ID: ${{ steps.gate.outputs.root_id }}
+        BOT_NAME: ${{ steps.bot.outputs.name }}
+        REPO_CONTEXT_FILE: ${{ steps.gate.outputs.repo_context_file }}
+        MODEL: ${{ steps.gate.outputs.model }}
       run: |
         set -euo pipefail
-        THREAD_JSON=$(gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/comments" \
-          | jq --argjson rid "${ROOT_ID}" \
-              '[.[] | select(.id == $rid or .in_reply_to_id == $rid)] | sort_by(.id)')
-        export THREAD_JSON
-        delim="CONVO_PROMPT_$(date +%s%N)"
+        node "${GITHUB_ACTION_PATH}/scripts/build-conversation-prompt.mjs"
+        delim="PAVO_ARGS_$(openssl rand -hex 16)"
         {
-          echo "prompt<<${delim}"
-          node "${ACTION_PATH}/scripts/build-conversation-prompt.mjs"
-          echo
+          echo "claude_args<<${delim}"
+          echo "--model ${MODEL}"
+          echo "--max-turns 30"
+          echo "--setting-sources user"
+          echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
+          echo "--disallowedTools \"Read(./.git/**)\""
+          echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/reply.json")'"
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
 
-    - if: steps.thread.outputs.skip == 'false'
-      uses: anthropics/claude-code-action@939ae9c056ecf8a1a01409ddd1c4eadec5f8c77b # v1.0.116
+    - id: claude-convo
+      if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
+      uses: anthropics/claude-code-action@700e7f8316990de46bed556429765647af760efc # v1.0.176
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         github_token: ${{ inputs.github_token }}
         bot_id: ${{ steps.bot.outputs.id }}
         bot_name: ${{ steps.bot.outputs.name }}
+        allowed_bots: ${{ inputs.allow_bots }}
         prompt: ${{ steps.convo-prompt.outputs.prompt }}
-        claude_args: |
-          --model sonnet
-          --allowedTools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+        claude_args: ${{ steps.convo-prompt.outputs.claude_args }}
+
+    - if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+        ROOT_ID: ${{ steps.gate.outputs.root_id }}
+        BOT_NAME: ${{ steps.bot.outputs.name }}
+        STRUCTURED_OUTPUT: ${{ steps.claude-convo.outputs.structured_output }}
+      run: |
+        set -euo pipefail
+        node "${GITHUB_ACTION_PATH}/scripts/post-reply.mjs"
+
+    # ===== failure notification =====
+
+    # A red Actions badge is easy to miss in solo operation; leave a trace on
+    # the PR itself. `|| true` — never mask the original failure.
+    - if: failure() && steps.gate.outputs.mode != 'skip' && steps.gate.outputs.pr_number != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        jq -n --arg body "⚠️ Pavo の実行が失敗しました: ${RUN_URL}" '{body: $body}' \
+          | gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input - || true
