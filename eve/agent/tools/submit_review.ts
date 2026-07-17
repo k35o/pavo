@@ -1,12 +1,17 @@
 import { defineTool } from 'eve/tools';
 import { z } from 'zod';
 
+import { rest } from '../lib/github.ts';
 import { postReview, type ReviewPolicy } from '../lib/review.ts';
 
-// The model supplies findings; this tool owns every side effect (filtering,
-// anchor validation, the single POST + salvage, APPROVE decision, stale
-// dismissals, thread resolution). Runs in the app runtime — the installation
-// token never reaches the model or the sandbox.
+// The model supplies findings only. The review target (repo / PR / head sha)
+// is NOT taken from the model — it is bound to the dispatch context of the
+// turn (ctx.session.auth.current.attributes, written by defaultGitHubAuth).
+// Otherwise a malicious PR could steer the model to post an APPROVE onto a
+// different PR in the same allowlisted org (confused deputy). Everything that
+// must not be left to an LLM (filtering, anchor validation, the single POST,
+// APPROVE decision, dismissals, thread resolution) runs here, in the app
+// runtime, where the installation token never reaches the model or sandbox.
 
 const finding = z.object({
   path: z.string().describe('リポジトリルートからの相対パス'),
@@ -23,14 +28,19 @@ const finding = z.object({
     .describe('対象行の置換だけで完結する修正がある場合のみ、置換後のコード（フェンスで囲まない）'),
 });
 
+function attribute(ctx: unknown, key: string): string | null {
+  const attrs = (ctx as { session?: { auth?: { current?: { attributes?: Record<string, unknown> } } } })
+    ?.session?.auth?.current?.attributes;
+  const value = attrs?.[key];
+  return typeof value === 'string' && value ? value : null;
+}
+
 export default defineTool({
   description:
     'レビュー結果を GitHub に投稿する。1 回のレビューセッションで必ず 1 回だけ、最後に呼ぶこと。' +
+    '投稿先の PR はこのターンの起動元に固定されており、あなたが指定する必要はない。' +
     '投稿・絵文字付与・APPROVE 判定・古い承認の整理はシステム側が行う。',
   inputSchema: z.object({
-    repo: z.string().describe('owner/name 形式。コンテキストに示された値をそのまま使う'),
-    pr_number: z.number().int(),
-    head_sha: z.string().describe('コンテキストに示されたレビュー対象 commit SHA'),
     summary: z
       .string()
       .describe('PR 全体のサマリ: TL;DR、指摘の集計行、指摘の索引、確認した観点（指摘 0 件でも根拠を書く）'),
@@ -43,13 +53,27 @@ export default defineTool({
       .default([])
       .describe('コンテキストの既存スレッド一覧のうち、現在のコードで解消済みと確認できた rootId'),
   }),
-  async execute(input) {
+  async execute(input, ctx) {
+    // Authoritative target from the dispatch context — never from the model.
+    const repo = attribute(ctx, 'repository');
+    const prNumber = Number(attribute(ctx, 'pull_request_number'));
+    if (!repo || !Number.isInteger(prNumber) || prNumber <= 0) {
+      return { posted: false, error: 'no PR is bound to this turn; refusing to post' };
+    }
+
     const allowlist = (process.env.PAVO_EVE_REPOS ?? '')
       .split(',')
       .map((entry) => entry.trim())
       .filter(Boolean);
-    if (!allowlist.includes(input.repo)) {
-      return { posted: false, error: `repo ${input.repo} is not in PAVO_EVE_REPOS` };
+    if (!allowlist.includes(repo)) {
+      return { posted: false, error: `repo ${repo} is not in PAVO_EVE_REPOS` };
+    }
+
+    // head sha comes from the PR itself, not the model.
+    const pr = await rest<{ head?: { sha?: string } }>('GET', `/repos/${repo}/pulls/${prNumber}`);
+    const headSha = pr.ok ? pr.body.head?.sha : undefined;
+    if (!headSha) {
+      return { posted: false, error: `could not resolve head sha for ${repo}#${prNumber}` };
     }
 
     const policy: ReviewPolicy = {
@@ -58,13 +82,15 @@ export default defineTool({
         .map((entry) => entry.trim())
         .filter(Boolean),
       minSeverity: 'suggestion',
-      approve: (process.env.PAVO_EVE_APPROVE ?? 'true') === 'true',
+      // Default COMMENT during the shadow phase: a prompt injection can then at
+      // most suppress findings, never manufacture an APPROVE.
+      approve: (process.env.PAVO_EVE_APPROVE ?? 'false') === 'true',
     };
 
     const result = await postReview({
-      repo: input.repo,
-      prNumber: input.pr_number,
-      headSha: input.head_sha,
+      repo,
+      prNumber,
+      headSha,
       botName: `${process.env.GITHUB_APP_SLUG ?? 'k8o-bot'}[bot]`,
       policy,
       summary: input.summary,

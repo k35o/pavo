@@ -168,6 +168,7 @@ export interface PostResult {
   dropped: { path: string; line: number; reason: string }[];
   resolvedCount: number;
   salvaged: boolean;
+  skipped?: boolean;
 }
 
 export async function postReview(options: {
@@ -185,6 +186,31 @@ export async function postReview(options: {
   const { repo, prNumber, headSha, botName, policy } = options;
   if (!options.summary?.trim()) {
     throw new Error('summary is empty — refusing to post an empty review');
+  }
+
+  // Idempotency: webhook redelivery / draft⇄ready toggles re-run the same
+  // head sha. If this bot already reviewed this sha, do nothing.
+  const existingReviews = await paginate<{ id: number; state: string; body?: string; user?: { login?: string } }>(
+    `/repos/${repo}/pulls/${prNumber}/reviews`,
+  );
+  const alreadyReviewed = existingReviews.some(
+    (review) =>
+      sameLogin(review.user?.login, botName) &&
+      (review.body ?? '').includes(`<!-- pavo:meta`) &&
+      (review.body ?? '').includes(`"sha":"${headSha}"`),
+  );
+  if (alreadyReviewed) {
+    return {
+      reviewId: 0,
+      event: 'COMMENT',
+      inlineCount: 0,
+      demotedCount: 0,
+      droppedCount: 0,
+      dropped: [],
+      resolvedCount: 0,
+      salvaged: false,
+      skipped: true,
+    };
   }
 
   const fileLines = await fetchFileLines(repo, prNumber);
@@ -302,7 +328,7 @@ async function resolveThreads(
           pullRequest(number: $number) {
             reviewThreads(first: 100, after: $cursor) {
               pageInfo { hasNextPage endCursor }
-              nodes { id isResolved comments(first: 1) { nodes { databaseId author { login } } } }
+              nodes { id isResolved comments(first: 20) { nodes { databaseId author { login } } } }
             }
           }
         }
@@ -314,6 +340,13 @@ async function resolveThreads(
       const root = thread.comments.nodes[0];
       if (!root || !wanted.has(root.databaseId)) continue;
       if (!sameLogin(root.author?.login, botName) || thread.isResolved) continue;
+      // Never auto-resolve a thread a human replied to: that would silently
+      // close their conversation and could bypass "require conversation
+      // resolution" merge gates.
+      const hasHumanReply = thread.comments.nodes.some(
+        (comment: { author?: { login?: string } }) => !sameLogin(comment.author?.login, botName),
+      );
+      if (hasHumanReply) continue;
       await graphql(
         'mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id } } }',
         { threadId: thread.id },

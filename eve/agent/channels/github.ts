@@ -97,6 +97,10 @@ export default githubChannel({
     if (ctx.conversation.kind !== 'review_thread') return null;
     const association = (comment.raw as any)?.author_association;
     if (!TRUSTED_ASSOCIATIONS.has(association)) return null;
+    // Same cross-repo guard as onPullRequest: never run on a true fork PR.
+    const headRepo = (comment.raw as any)?.pull_request?.head?.repo?.full_name
+      ?? (comment.raw as any)?.pull_request_url?.match(/repos\/([^/]+\/[^/]+)\/pulls/)?.[1];
+    if (headRepo && headRepo !== ctx.repository.fullName) return null;
     return {
       auth: defaultGitHubAuth(ctx),
       context: [

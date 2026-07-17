@@ -2,8 +2,9 @@ import { defineEval } from 'eve/evals';
 
 // Live smoke of the whole eve wiring with the real Fugu model: instructions
 // drive the model to investigate and finish with exactly one submit_review
-// call. PAVO_EVE_REPOS is unset during evals, so the tool rejects via the
-// allowlist and nothing reaches GitHub.
+// call. No PR is bound to the eval turn (no dispatch context) and
+// PAVO_EVE_REPOS is unset, so the tool refuses to post — nothing reaches
+// GitHub. We only assert the model reaches the tool call.
 export default defineEval({
   description: 'レビュー実行が submit_review 1 回で締まる（fugu 実打・投稿なし）',
   timeoutMs: 600_000,
