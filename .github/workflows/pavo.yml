@@ -20,7 +20,7 @@ jobs:
     # Cheap pre-filter so ordinary PR comments don't spin up a runner just to
     # be skipped by the gate.
     if: ${{ github.event_name != 'issue_comment' || startsWith(github.event.comment.body, '/pavo') }}
-    uses: k35o/pavo/.github/workflows/review.yml@815b19a30b24cacccb8faa42e533521f57d94f9a # main
+    uses: k35o/pavo/.github/workflows/review.yml@6fc74320f5486215e27260e05ff148ba5b708f0b # main
     with:
       instructions: default,github-actions,node
       # Renovate PRs (mainly claude-code-action bumps) get reviewed too — the
