@@ -36,8 +36,12 @@ export function gh(args: string[], { input, allowFailure = false }: GhOptions = 
       status: failed.status ?? null,
     };
     if (allowFailure) return result;
+    // stderr/stdout are empty when the process never ran (ENOENT, signal);
+    // fall back to the spawn error itself so the failure stays diagnosable.
     throw new Error(
-      `gh ${args.join(' ')} failed (status=${result.status}): ${result.stderr || result.stdout}`,
+      `gh ${args.join(' ')} failed (status=${result.status}): ${
+        result.stderr || result.stdout || (error as Error).message
+      }`,
     );
   }
 }

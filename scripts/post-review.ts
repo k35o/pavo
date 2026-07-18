@@ -13,6 +13,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { addStepSummary, notice, warning } from './lib/actions.ts';
+import { sameLogin } from './lib/bot.ts';
 import { severityRank } from './lib/config.ts';
 import { gh, ghJson, ghPaginate } from './lib/gh.ts';
 import { matchesAnyGlob } from './lib/glob.ts';
@@ -188,7 +189,7 @@ function dismissStaleApprovals(
 ): void {
   const reviews = ghPaginate(`repos/${repo}/pulls/${prNumber}/reviews`);
   for (const review of reviews) {
-    if (review.user?.login !== botName) continue;
+    if (!sameLogin(review.user?.login, botName)) continue;
     if (review.state !== 'APPROVED') continue;
     if (review.id === keepReviewId) continue;
     const result = gh(

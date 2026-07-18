@@ -53,6 +53,9 @@ function main(): void {
   const repo = requireEnv('REPO');
   const botName = requireEnv('BOT_NAME');
   const limit = Number(process.env.PR_LIMIT ?? 20);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error(`Invalid PR_LIMIT: ${process.env.PR_LIMIT} (expected 1-100)`);
+  }
 
   const prs = ghJson<any[]>([
     'api',
@@ -72,10 +75,13 @@ function main(): void {
   }
 
   const rate = total.threads === 0 ? '-' : `${Math.round((total.resolved / total.threads) * 100)}%`;
+  rows.push(
+    `| **計** | **${total.threads}** | **${total.resolved}** (${rate}) | **${total.thumbsUp}** | **${total.thumbsDown}** |`,
+  );
   const report =
     `## Pavo metrics: ${repo} (直近 ${limit} PR)\n\n` +
     `| PR | 指摘スレッド | resolved | 👍 | 👎 |\n| --- | --- | --- | --- | --- |\n` +
-    `${rows.join('\n')}\n| **計** | **${total.threads}** | **${total.resolved}** (${rate}) | **${total.thumbsUp}** | **${total.thumbsDown}** |\n`;
+    `${rows.join('\n')}\n`;
 
   console.log(report);
   addStepSummary(report);

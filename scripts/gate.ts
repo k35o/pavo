@@ -21,9 +21,9 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { setOutputs, notice } from './lib/actions.ts';
-import { normalizeLogin } from './lib/bot.ts';
-import { parseList, resolveConfig, type RepoConfig } from './lib/config.ts';
-import { ghJson } from './lib/gh.ts';
+import { normalizeLogin, sameLogin } from './lib/bot.ts';
+import { parseList, parseRepoConfig, resolveConfig, type RepoConfig } from './lib/config.ts';
+import { gh, ghJson } from './lib/gh.ts';
 import { requireEnv } from './lib/env.ts';
 
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -91,7 +91,7 @@ export function decide(event: GateEvent, options: GateOptions, deps: GateDeps): 
 
   const sender = payload.sender ?? {};
   if (sender.type === 'Bot') {
-    if (sender.login === botName) return skip('event triggered by Pavo itself');
+    if (sameLogin(sender.login, botName)) return skip('event triggered by Pavo itself');
     if (!allowBots.includes(normalizeLogin(sender.login ?? ''))) {
       return skip(`sender is a bot not in allow_bots (${sender.login})`);
     }
@@ -109,7 +109,7 @@ export function decide(event: GateEvent, options: GateOptions, deps: GateDeps): 
     const pr = payload.pull_request;
     const action = payload.action;
     if (action === 'review_requested') {
-      if (payload.requested_reviewer?.login !== botName) {
+      if (!sameLogin(payload.requested_reviewer?.login, botName)) {
         return skip('review requested for someone else');
       }
     } else if (!['opened', 'synchronize', 'reopened', 'ready_for_review'].includes(action)) {
@@ -171,19 +171,22 @@ function fetchRepoFile(repository: string, filePath: string, ref?: string): stri
   const endpoint = ref
     ? `repos/${repository}/contents/${filePath}?ref=${ref}`
     : `repos/${repository}/contents/${filePath}`;
-  const file = ghJson<{ content?: string }>(['api', endpoint], { allowFailure: true });
+  const result = gh(['api', endpoint], { allowFailure: true });
+  if (!result.ok) {
+    // Only 404 means "file (or ref) does not exist". Anything else (403 from
+    // a missing Contents permission, rate limit, outage) must not silently
+    // review with the repo settings dropped.
+    if (result.stderr.includes('HTTP 404')) return null;
+    throw new Error(`Failed to read ${filePath}: ${result.stderr || result.stdout}`);
+  }
+  const file = JSON.parse(result.stdout) as { content?: string };
   if (!file?.content) return null;
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
 
 function fetchRepoConfig(repository: string): RepoConfig | null {
   const raw = fetchRepoFile(repository, '.github/pavo.json');
-  if (raw === null) return null;
-  try {
-    return JSON.parse(raw) as RepoConfig;
-  } catch (cause) {
-    throw new Error('.github/pavo.json is not valid JSON', { cause });
-  }
+  return raw === null ? null : parseRepoConfig(raw);
 }
 
 function main(): void {

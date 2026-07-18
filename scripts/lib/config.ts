@@ -47,6 +47,32 @@ export interface ConfigInputs {
 /** Loosely-typed shape of .github/pavo.json (user-authored). */
 export type RepoConfig = Record<string, unknown>;
 
+// `$schema` is tolerated because editors commonly add it to user-authored JSON.
+const REPO_CONFIG_KEYS = new Set([
+  '$schema',
+  'instructions',
+  'ignore',
+  'language',
+  'approve',
+  'min_severity',
+  'model',
+  'review_drafts',
+]);
+
+/** Parse .github/pavo.json, rejecting anything that is not a JSON object. */
+export function parseRepoConfig(raw: string): RepoConfig {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error('.github/pavo.json is not valid JSON', { cause });
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('.github/pavo.json must be a JSON object');
+  }
+  return parsed as RepoConfig;
+}
+
 function parseBool(value: unknown, fallback: boolean): boolean {
   if (value === undefined || value === null || value === '') return fallback;
   if (typeof value === 'boolean') return value;
@@ -64,6 +90,15 @@ export function parseList(value: unknown): string[] {
 
 export function resolveConfig(inputs: ConfigInputs, repoConfig: RepoConfig | null): PavoConfig {
   const repo = repoConfig ?? {};
+  // A typo'd key silently reviewing with defaults is worse than a red run —
+  // same policy as unknown instruction names.
+  for (const key of Object.keys(repo)) {
+    if (!REPO_CONFIG_KEYS.has(key)) {
+      throw new Error(
+        `Unknown key in .github/pavo.json: ${key} (instructions|ignore|language|approve|min_severity|model|review_drafts)`,
+      );
+    }
+  }
   const language = String(repo.language ?? inputs.language ?? DEFAULTS.language);
   const minSeverity = String(repo.min_severity ?? inputs.minSeverity ?? DEFAULTS.minSeverity);
 

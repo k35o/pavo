@@ -113,7 +113,7 @@ Pavo 自身は Client ID / Private key を受け取らず、`actions/create-gith
 
 caller workflow を触らずにリポジトリ側で調整したい場合、以下のファイルが読まれる。いずれも **デフォルトブランチの内容**が使われる（PR がレビュー設定を書き換えても、その PR 自身のレビューには効かない。設定変更はデフォルトブランチに merge されてから有効になる）。
 
-- `.github/pavo.json` — 設定。**action inputs より優先**
+- `.github/pavo.json` — 設定。**action inputs より優先**。未知のキーはエラーで落ちる（typo が黙ってデフォルト値に落ちない）
 
   ```json
   {

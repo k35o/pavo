@@ -18,16 +18,25 @@ test('sameLogin は GraphQL / REST の表記差を吸収する', () => {
 
 test('extractLastReviewedSha: サフィックスなし login の bot レビューからマーカーを拾う', () => {
   const reviews = [
-    { author: { login: 'k35o-bot' }, body: 'old <!-- pavo:meta {"sha":"aaa"} -->' },
-    { author: { login: 'k8o' }, body: 'human <!-- pavo:meta {"sha":"human"} -->' },
-    { author: { login: 'k35o-bot' }, body: 'new <!-- pavo:meta {"sha":"bbb"} -->' },
+    { author: { login: 'k35o-bot' }, body: 'old <!-- pavo:meta {"sha":"aaaaaaa"} -->' },
+    { author: { login: 'k8o' }, body: 'human <!-- pavo:meta {"sha":"1234abc"} -->' },
+    { author: { login: 'k35o-bot' }, body: 'new <!-- pavo:meta {"sha":"bbbbbbb"} -->' },
   ];
-  assert.equal(extractLastReviewedSha(reviews, BOT_NAME), 'bbb');
+  assert.equal(extractLastReviewedSha(reviews, BOT_NAME), 'bbbbbbb');
   assert.equal(extractLastReviewedSha([], BOT_NAME), null);
   assert.equal(
     extractLastReviewedSha([{ author: { login: 'k35o-bot' }, body: 'no marker' }], BOT_NAME),
     null,
   );
+});
+
+test('extractLastReviewedSha: commit 形式でない sha のマーカーは無視して古い正当なマーカーに戻る', () => {
+  // レビュー本文は後から編集できるため、compare API のパスに流れる sha は形式検証する
+  const reviews = [
+    { author: { login: 'k35o-bot' }, body: '<!-- pavo:meta {"sha":"aaaaaaa"} -->' },
+    { author: { login: 'k35o-bot' }, body: '<!-- pavo:meta {"sha":"../../evil"} -->' },
+  ];
+  assert.equal(extractLastReviewedSha(reviews, BOT_NAME), 'aaaaaaa');
 });
 
 test('summarizeThreads: byPavo / isBot がサフィックスなし login でも立ち、切り詰めを記録する', () => {

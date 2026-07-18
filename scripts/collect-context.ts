@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { setOutputs, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
-import { ghJson, ghPaginate, ghPaginatePrConnection } from './lib/gh.ts';
+import { ghGraphql, ghJson, ghPaginate, ghPaginatePrConnection } from './lib/gh.ts';
 import type {
   ChangedFileEntry,
   CompareInfo,
@@ -38,7 +38,7 @@ const REVIEW_LIMIT = 15;
 const ISSUE_COMMENT_LIMIT = 30;
 const COMPARE_FILE_LIMIT = 200;
 
-export const META_MARKER_PATTERN = /<!-- pavo:meta (\{.*?\}) -->/s;
+export const META_MARKER_PATTERN = /<!-- pavo:meta (\{.*?\}) -->/gs;
 
 const truncate = (body: string | null | undefined, limit: number = BODY_LIMIT): string => {
   const text = body ?? '';
@@ -70,12 +70,21 @@ function fetchReviews(owner: string, name: string, number: number): any[] {
   });
 }
 
+// Only the tail of the conversation feeds the prompt, so ask for exactly
+// that instead of paginating through the whole history.
 function fetchIssueComments(owner: string, name: string, number: number): any[] {
-  return ghPaginatePrConnection(owner, name, number, {
-    field: 'comments',
-    first: 100,
-    selection: 'author { login } body',
-  });
+  const query = `
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          comments(last: ${ISSUE_COMMENT_LIMIT}) {
+            nodes { author { login } body }
+          }
+        }
+      }
+    }`;
+  const data: any = ghGraphql(query, { owner, name, number });
+  return data.repository.pullRequest.comments.nodes;
 }
 
 /**
@@ -86,11 +95,15 @@ function fetchIssueComments(owner: string, name: string, number: number): any[] 
 export function extractLastReviewedSha(reviews: any[], botName: string): string | null {
   for (const review of [...reviews].reverse()) {
     if (!sameLogin(review.author?.login, botName)) continue;
-    const match = META_MARKER_PATTERN.exec(review.body ?? '');
+    // buildReviewBody appends the marker last; the body's prefix is
+    // Claude-generated text, so an earlier marker-shaped string is spoofable.
+    const match = [...(review.body ?? '').matchAll(META_MARKER_PATTERN)].at(-1);
     if (!match) continue;
     try {
       const meta = JSON.parse(match[1]!);
-      if (typeof meta.sha === 'string' && meta.sha) return meta.sha;
+      // The SHA is interpolated into a compare API path later; accept only
+      // something commit-shaped (review bodies are editable after the fact).
+      if (typeof meta.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(meta.sha)) return meta.sha;
     } catch {
       // A corrupted marker only costs us the incremental hint.
     }
@@ -165,13 +178,13 @@ function main(): void {
 
   const rawReviews = fetchReviews(owner, name, number);
   const { threads, dropped } = summarizeThreads(fetchThreads(owner, name, number), botName);
-  const issueComments: ThreadComment[] = fetchIssueComments(owner, name, number)
-    .slice(-ISSUE_COMMENT_LIMIT)
-    .map((comment) => ({
+  const issueComments: ThreadComment[] = fetchIssueComments(owner, name, number).map(
+    (comment) => ({
       author: comment.author?.login ?? '?',
       isBot: sameLogin(comment.author?.login, botName),
       body: truncate(comment.body),
-    }));
+    }),
+  );
 
   const lastReviewedSha = extractLastReviewedSha(rawReviews, botName);
   const sameAsLastReview = lastReviewedSha === headSha;
@@ -194,18 +207,29 @@ function main(): void {
   fs.mkdirSync(diffDir, { recursive: true });
   const changedFiles: ChangedFileEntry[] = [];
   for (const file of ghPaginate(`repos/${repo}/pulls/${number}/files`)) {
+    // hasPatch reflects whether the .diff file actually exists for the
+    // prompt's "read it with Read" instruction — a path collision (file `x`
+    // vs directory `x.diff/`) degrades to a warning, not a crashed run.
+    let wrote = false;
+    if (file.patch) {
+      const target = path.resolve(diffDir, `${file.filename}.diff`);
+      if (target.startsWith(path.resolve(diffDir) + path.sep)) {
+        try {
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, `${file.patch}\n`);
+          wrote = true;
+        } catch (error) {
+          warning(`Could not write diff for ${file.filename}: ${(error as Error).message}`);
+        }
+      }
+    }
     changedFiles.push({
       filename: file.filename,
       status: file.status,
       additions: file.additions,
       deletions: file.deletions,
-      hasPatch: Boolean(file.patch),
+      hasPatch: wrote,
     });
-    if (!file.patch) continue;
-    const target = path.resolve(diffDir, `${file.filename}.diff`);
-    if (!target.startsWith(path.resolve(diffDir) + path.sep)) continue;
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, `${file.patch}\n`);
   }
 
   const context: ReviewContext = {
