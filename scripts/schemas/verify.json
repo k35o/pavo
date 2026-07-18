@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": ["verdicts"],
+  "additionalProperties": false,
+  "properties": {
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "verdict"],
+        "additionalProperties": false,
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "verdict": {
+            "type": "string",
+            "enum": ["confirmed", "refuted", "uncertain"]
+          },
+          "note": {
+            "type": "string",
+            "description": "反証の根拠（refuted のとき必須）"
+          }
+        }
+      }
+    }
+  }
+}

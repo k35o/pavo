@@ -91,7 +91,9 @@ export function buildConversationPrompt({
       `${fence}diff\n` +
       `${hunk}\n` +
       `${fence}\n\n` +
-      '必要なら `Read` でファイル全体を、`gh pr diff` で PR 全体の diff を確認してください。\n',
+      'この hunk は**コメント作成時点**のものです。その後の push で変わっている可能性があるため、' +
+      '修正の確認や resolve の判断の前に必ず `Read` で現在の内容を確認してください。\n' +
+      '必要なら `gh pr diff` で PR 全体の diff も確認できます。\n',
   );
 
   const convoLines = [

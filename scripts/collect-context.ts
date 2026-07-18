@@ -21,9 +21,11 @@ import { fileURLToPath } from 'node:url';
 import { setOutputs, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { ghGraphql, ghJson, ghPaginate, ghPaginatePrConnection } from './lib/gh.ts';
+import { stripFindingMarkers } from './lib/markers.ts';
 import type {
   ChangedFileEntry,
   CompareInfo,
+  LinkedIssue,
   ReviewContext,
   ReviewSummaryEntry,
   ThreadComment,
@@ -37,6 +39,9 @@ const REPLIES_PER_THREAD = 10;
 const REVIEW_LIMIT = 15;
 const ISSUE_COMMENT_LIMIT = 30;
 const COMPARE_FILE_LIMIT = 200;
+const LINKED_ISSUE_LIMIT = 5;
+const LINKED_ISSUE_BODY_LIMIT = 1500;
+const COMMIT_MESSAGE_LIMIT = 20;
 
 export const META_MARKER_PATTERN = /<!-- pavo:meta (\{.*?\}) -->/gs;
 
@@ -68,6 +73,41 @@ function fetchReviews(owner: string, name: string, number: number): any[] {
     first: 100,
     selection: 'databaseId author { login } state body submittedAt',
   });
+}
+
+// The PR's declared intent often lives outside the description: in the
+// issues it closes and in commit messages. Fetch both so the reviewer can
+// check "does the change do what was asked" without spending tool turns.
+function fetchIntentBundle(
+  owner: string,
+  name: string,
+  number: number,
+): { linkedIssues: LinkedIssue[]; commitMessages: string[] } {
+  const query = `
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          closingIssuesReferences(first: ${LINKED_ISSUE_LIMIT}) {
+            nodes { number title body }
+          }
+          commits(last: ${COMMIT_MESSAGE_LIMIT}) {
+            nodes { commit { messageHeadline } }
+          }
+        }
+      }
+    }`;
+  const data: any = ghGraphql(query, { owner, name, number });
+  const pr = data.repository.pullRequest;
+  return {
+    linkedIssues: pr.closingIssuesReferences.nodes.map((issue: any) => ({
+      number: issue.number,
+      title: issue.title ?? '',
+      body: truncate(issue.body, LINKED_ISSUE_BODY_LIMIT),
+    })),
+    commitMessages: pr.commits.nodes
+      .map((node: any) => node.commit?.messageHeadline ?? '')
+      .filter(Boolean),
+  };
 }
 
 // Only the tail of the conversation feeds the prompt, so ask for exactly
@@ -129,7 +169,7 @@ export function summarizeThreads(
       comments: comments.map((comment: any) => ({
         author: comment.author?.login ?? '?',
         isBot: sameLogin(comment.author?.login, botName),
-        body: truncate(comment.body),
+        body: truncate(stripFindingMarkers(comment.body ?? '')),
       })),
     };
   });
@@ -153,18 +193,45 @@ export function summarizeThreads(
   return { threads: kept, dropped: shaped.length - kept.length };
 }
 
-function fetchChangedSince(repo: string, base: string | null, head: string): CompareInfo | null {
+/**
+ * Write one file's patch under baseDir, refusing paths that escape it and
+ * degrading collisions (file `x` vs directory `x.diff/`) to a warning.
+ * @returns whether the .diff file actually exists afterwards
+ */
+function writePatchFile(baseDir: string, filename: string, patch: string): boolean {
+  const target = path.resolve(baseDir, `${filename}.diff`);
+  if (!target.startsWith(path.resolve(baseDir) + path.sep)) return false;
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${patch}\n`);
+    return true;
+  } catch (error) {
+    warning(`Could not write diff for ${filename}: ${(error as Error).message}`);
+    return false;
+  }
+}
+
+function fetchChangedSince(
+  repo: string,
+  base: string | null,
+  head: string,
+  deltaDir: string,
+): CompareInfo | null {
   if (!base || base === head) return null;
   const compare = ghJson(['api', `repos/${repo}/compare/${base}...${head}`], {
     allowFailure: true,
   });
   if (!compare?.files) return null;
+  fs.mkdirSync(deltaDir, { recursive: true });
   return {
     baseSha: base,
-    files: compare.files
-      .slice(0, COMPARE_FILE_LIMIT)
-      .map((file: any) => ({ filename: file.filename, status: file.status })),
+    files: compare.files.slice(0, COMPARE_FILE_LIMIT).map((file: any) => ({
+      filename: file.filename,
+      status: file.status,
+      hasPatch: file.patch ? writePatchFile(deltaDir, file.filename, file.patch) : false,
+    })),
     truncated: compare.files.length > COMPARE_FILE_LIMIT,
+    deltaDir,
   };
 }
 
@@ -177,6 +244,7 @@ function main(): void {
   const outDir = requireEnv('OUT_DIR');
 
   const rawReviews = fetchReviews(owner, name, number);
+  const { linkedIssues, commitMessages } = fetchIntentBundle(owner, name, number);
   const { threads, dropped } = summarizeThreads(fetchThreads(owner, name, number), botName);
   const issueComments: ThreadComment[] = fetchIssueComments(owner, name, number).map(
     (comment) => ({
@@ -190,7 +258,7 @@ function main(): void {
   const sameAsLastReview = lastReviewedSha === headSha;
   let changedSinceLastReview: CompareInfo | null = null;
   if (lastReviewedSha && !sameAsLastReview) {
-    changedSinceLastReview = fetchChangedSince(repo, lastReviewedSha, headSha);
+    changedSinceLastReview = fetchChangedSince(repo, lastReviewedSha, headSha, path.join(outDir, 'delta'));
     if (!changedSinceLastReview) {
       warning('Could not compare against the last reviewed SHA (force push?); running a full review.');
     }
@@ -207,28 +275,12 @@ function main(): void {
   fs.mkdirSync(diffDir, { recursive: true });
   const changedFiles: ChangedFileEntry[] = [];
   for (const file of ghPaginate(`repos/${repo}/pulls/${number}/files`)) {
-    // hasPatch reflects whether the .diff file actually exists for the
-    // prompt's "read it with Read" instruction — a path collision (file `x`
-    // vs directory `x.diff/`) degrades to a warning, not a crashed run.
-    let wrote = false;
-    if (file.patch) {
-      const target = path.resolve(diffDir, `${file.filename}.diff`);
-      if (target.startsWith(path.resolve(diffDir) + path.sep)) {
-        try {
-          fs.mkdirSync(path.dirname(target), { recursive: true });
-          fs.writeFileSync(target, `${file.patch}\n`);
-          wrote = true;
-        } catch (error) {
-          warning(`Could not write diff for ${file.filename}: ${(error as Error).message}`);
-        }
-      }
-    }
     changedFiles.push({
       filename: file.filename,
       status: file.status,
       additions: file.additions,
       deletions: file.deletions,
-      hasPatch: wrote,
+      hasPatch: file.patch ? writePatchFile(diffDir, file.filename, file.patch) : false,
     });
   }
 
@@ -243,6 +295,8 @@ function main(): void {
     changedSinceLastReview,
     diffDir,
     changedFiles,
+    linkedIssues,
+    commitMessages,
   };
 
   const contextFile = path.join(outDir, 'context.json');

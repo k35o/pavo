@@ -30,6 +30,8 @@ const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const COMMAND_PATTERN = /^\/pavo(?:\s+review)?\s*$/;
 const DEEP_LABEL = 'pavo:deep';
 const PR_BODY_LIMIT = 16000;
+const CONVENTIONS_LIMIT = 8000;
+const CONVENTION_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/CLAUDE.md'];
 
 /** Untyped webhook payload — only the fields we touch are accessed. */
 type Payload = any;
@@ -244,6 +246,7 @@ function main(): void {
     config = resolveConfig(inputs, repoConfig);
   }
   const model = resolveModel(config.model, decision.pr.labels);
+  const deep = decision.pr.labels.includes(DEEP_LABEL);
 
   const outDir = requireEnv('OUT_DIR');
   fs.mkdirSync(outDir, { recursive: true });
@@ -267,6 +270,24 @@ function main(): void {
     sideFiles[key] = target;
   }
 
+  // Project conventions also come from the DEFAULT branch, for the same
+  // reason as pavo.json: a PR must not rewrite the conventions it is
+  // reviewed under. The PR-head copy still shows up as a reviewable diff.
+  sideFiles.conventions_file = '';
+  for (const candidate of CONVENTION_FILES) {
+    const conventions = fetchRepoFile(repository, candidate);
+    if (conventions === null) continue;
+    const target = path.join(outDir, 'repo-conventions.md');
+    fs.writeFileSync(
+      target,
+      conventions.length > CONVENTIONS_LIMIT
+        ? `${conventions.slice(0, CONVENTIONS_LIMIT)}…(truncated)`
+        : conventions,
+    );
+    sideFiles.conventions_file = target;
+    break;
+  }
+
   const body = decision.pr.body ?? '';
   setOutputs({
     mode: decision.mode,
@@ -277,6 +298,7 @@ function main(): void {
     on_demand: decision.mode === 'review' && decision.onDemand ? 'true' : 'false',
     root_id: decision.mode === 'convo' ? String(decision.convo.rootId) : '',
     model,
+    deep: deep ? 'true' : 'false',
     config: JSON.stringify({ ...config, model }),
     ...sideFiles,
   });

@@ -135,6 +135,16 @@ runs:
           echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/${schema}")'"
           echo "${delim}"
         } >> "$GITHUB_OUTPUT"
+        {
+          echo "verify_args<<${delim}"
+          echo "--model ${MODEL}"
+          echo "--max-turns 30"
+          echo "--setting-sources user"
+          echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
+          echo "--disallowedTools \"Read(./.git/**),Grep(./.git/**)\""
+          echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/verify.json")'"
+          echo "${delim}"
+        } >> "$GITHUB_OUTPUT"
 
     # The head commit (not the transient merge ref): what `gh pr diff` shows,
     # what Read sees, and what inline comment anchors refer to must all be the
@@ -179,6 +189,7 @@ runs:
         ON_DEMAND: ${{ steps.gate.outputs.on_demand }}
         REPO_CONTEXT_FILE: ${{ steps.gate.outputs.repo_context_file }}
         LEARNINGS_FILE: ${{ steps.gate.outputs.learnings_file }}
+        CONVENTIONS_FILE: ${{ steps.gate.outputs.conventions_file }}
       run: |
         set -euo pipefail
         node "${GITHUB_ACTION_PATH}/scripts/build-review-prompt.ts"
@@ -195,6 +206,36 @@ runs:
         prompt: ${{ steps.review-prompt.outputs.prompt }}
         claude_args: ${{ steps.claude-args.outputs.claude_args }}
 
+    # Under the pavo:deep label, a fresh session sees only the 🔴/🟡 findings
+    # (not the reviewing session's reasoning) and tries to refute each one;
+    # post-review.ts demotes the refuted findings. Clean reviews skip this.
+    # continue-on-error: a broken verification pass must degrade to posting
+    # the unverified review, never discard a review that is ready to post.
+    - id: verify-prompt
+      if: steps.gate.outputs.mode == 'review' && steps.gate.outputs.deep == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        STRUCTURED_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+      run: |
+        set -euo pipefail
+        node "${GITHUB_ACTION_PATH}/scripts/build-verify-prompt.ts"
+
+    - id: claude-verify
+      if: steps.gate.outputs.mode == 'review' && steps.gate.outputs.deep == 'true' && steps.verify-prompt.outputs.skip == 'false'
+      continue-on-error: true
+      uses: anthropics/claude-code-action@700e7f8316990de46bed556429765647af760efc # v1.0.176
+      with:
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        github_token: ${{ inputs.github_token }}
+        bot_id: ${{ steps.bot.outputs.id }}
+        bot_name: ${{ steps.bot.outputs.name }}
+        allowed_bots: ${{ inputs.allow_bots }}
+        prompt: ${{ steps.verify-prompt.outputs.prompt }}
+        claude_args: ${{ steps.claude-args.outputs.verify_args }}
+
     - if: steps.gate.outputs.mode == 'review'
       shell: bash
       env:
@@ -205,6 +246,8 @@ runs:
         BOT_NAME: ${{ steps.bot.outputs.name }}
         CONFIG: ${{ steps.gate.outputs.config }}
         STRUCTURED_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
+        CONTEXT_FILE: ${{ steps.context.outputs.context_file }}
+        VERIFY_OUTPUT: ${{ steps.claude-verify.outputs.structured_output }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         PAVO_REF: ${{ github.action_ref }}
       run: |
