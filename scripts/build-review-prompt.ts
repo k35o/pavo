@@ -25,20 +25,19 @@ import { fileURLToPath } from 'node:url';
 
 import { warning } from './lib/actions.ts';
 import { resolveInstructionFiles } from './lib/instructions.ts';
-import { requireEnv } from './env.ts';
+import {
+  prDescriptionSection,
+  readIfExists,
+  repoContextSection,
+  sanitizeUntrusted,
+} from './lib/prompt.ts';
+import { requireEnv } from './lib/env.ts';
 import type { PavoConfig, ReviewContext } from './lib/types.ts';
 
 // Inputs (prompt included) travel through env vars, which Linux caps around
 // 128KiB per variable. Stay far enough below that the wrapping YAML and the
 // action's own additions cannot push it over.
 const PROMPT_BYTE_BUDGET = 90000;
-
-// Neutralize閉じタグ偽装: untrusted テキストが自分を囲むフェンスを閉じられないようにする。
-const sanitizeUntrusted = (text: string | null | undefined): string =>
-  (text ?? '').replaceAll('</pavo-', '<\\/pavo-');
-
-const readIfExists = (file: string): string | null =>
-  fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trimEnd() : null;
 
 function languageSection(language: PavoConfig['language']): string {
   if (language === 'ja') return '## 出力言語\n\nすべての出力は日本語で書いてください。\n';
@@ -217,13 +216,7 @@ export function buildReviewPrompt({
       'diff を確認するときは `gh pr diff` を、ファイルの現在の内容は `Read` を使ってください。\n',
   );
 
-  sections.push(
-    '## PR タイトルと description\n\n' +
-      '<pavo-pr-description>\n' +
-      `タイトル: ${sanitizeUntrusted(prTitle) || '(なし)'}\n\n` +
-      `${sanitizeUntrusted(prBody) || '(empty)'}\n` +
-      '</pavo-pr-description>\n',
-  );
+  sections.push(prDescriptionSection(prTitle, prBody));
 
   sections.push(languageSection(config.language));
 
@@ -231,12 +224,8 @@ export function buildReviewPrompt({
     sections.push(`${fs.readFileSync(file, 'utf8').trimEnd()}\n`);
   }
 
-  const repoContext: string[] = [];
-  if (repoContextMd) repoContext.push(repoContextMd.trimEnd());
-  if (config.extraPrompt) repoContext.push(config.extraPrompt.trimEnd());
-  if (repoContext.length > 0) {
-    sections.push(`## このリポジトリの追加コンテキスト\n\n${repoContext.join('\n\n')}\n`);
-  }
+  const repoContext = repoContextSection(repoContextMd, config.extraPrompt);
+  if (repoContext) sections.push(repoContext);
 
   if (learnings) {
     sections.push(
@@ -286,6 +275,39 @@ export function buildReviewPrompt({
   return sections.join('\n---\n\n');
 }
 
+/**
+ * Shed conversation context in two stages until the prompt fits the byte
+ * budget: resolved threads and comment history first, then the whole
+ * conversation. Unresolved Pavo threads survive the first stage so the
+ * reviewer still avoids re-posting known findings.
+ */
+export function buildPromptWithinBudget(
+  params: BuildReviewPromptParams,
+  budget: number = PROMPT_BYTE_BUDGET,
+): string {
+  let prompt = buildReviewPrompt(params);
+  if (Buffer.byteLength(prompt) > budget && params.context) {
+    // Conversation history is the only unbounded section; shed it first.
+    warning('Prompt exceeds the byte budget; dropping resolved threads and comment history.');
+    const slimContext = {
+      ...params.context,
+      threads: params.context.threads.filter((thread) => thread.byPavo && !thread.isResolved),
+      reviews: [],
+      issueComments: [],
+      droppedThreads: 0,
+    };
+    prompt = buildReviewPrompt({ ...params, context: slimContext });
+    if (Buffer.byteLength(prompt) > budget) {
+      warning('Prompt still exceeds the byte budget; dropping the conversation context entirely.');
+      prompt = buildReviewPrompt({ ...params, context: { ...slimContext, threads: [] } });
+    }
+  }
+  if (Buffer.byteLength(prompt) > budget) {
+    warning('Prompt exceeds the byte budget even without conversation context; the run may fail.');
+  }
+  return prompt;
+}
+
 function main(): void {
   const contextFile = process.env.CONTEXT_FILE;
   const params: BuildReviewPromptParams = {
@@ -308,24 +330,7 @@ function main(): void {
     learnings: process.env.LEARNINGS_FILE ? readIfExists(process.env.LEARNINGS_FILE) : null,
   };
 
-  let prompt = buildReviewPrompt(params);
-  if (Buffer.byteLength(prompt) > PROMPT_BYTE_BUDGET && params.context) {
-    // Conversation history is the only unbounded section; shed it first.
-    warning('Prompt exceeds the byte budget; dropping resolved threads and comment history.');
-    const slimContext = {
-      ...params.context,
-      threads: params.context.threads.filter((thread) => thread.byPavo && !thread.isResolved),
-      reviews: [],
-      issueComments: [],
-      droppedThreads: 0,
-    };
-    prompt = buildReviewPrompt({ ...params, context: slimContext });
-    if (Buffer.byteLength(prompt) > PROMPT_BYTE_BUDGET) {
-      warning('Prompt still exceeds the byte budget; dropping the conversation context entirely.');
-      prompt = buildReviewPrompt({ ...params, context: { ...slimContext, threads: [] } });
-    }
-  }
-  process.stdout.write(prompt);
+  process.stdout.write(buildPromptWithinBudget(params));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { extractLastReviewedSha } from '../scripts/collect-context.ts';
 import { parsePatchLines } from '../scripts/lib/patch.ts';
 import {
   buildReviewBody,
@@ -47,6 +48,25 @@ test('confidence 80 未満は drop（praise は対象外）', () => {
 test('ignore glob に一致する path は drop', () => {
   const { dropped } = partitionComments([comment({ path: 'pnpm.lock' })], CONFIG, FILES);
   assert.equal(dropped[0]!.reason, 'ignored path');
+});
+
+test('壊れた指摘（path/line/body 欠落・未知 severity）は drop', () => {
+  const { inline, demoted, dropped } = partitionComments(
+    [
+      { line: 2, severity: 'warning', confidence: 90, body: 'path がない' },
+      comment({ line: Number.NaN }),
+      comment({ body: '   ' }),
+      comment({ severity: 'blocker' as ReviewFinding['severity'] }),
+    ],
+    CONFIG,
+    FILES,
+  );
+  assert.equal(inline.length, 0);
+  assert.equal(demoted.length, 0);
+  assert.deepEqual(
+    dropped.map((entry) => entry.reason),
+    ['malformed', 'malformed', 'malformed', 'unknown severity: blocker'],
+  );
 });
 
 test('min_severity 未満は demote され、diff 外のアンカーも demote される', () => {
@@ -110,4 +130,15 @@ test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   assert.ok(body.includes('<details>'));
   assert.ok(body.includes('その他の観察 (1)'));
   assert.match(body, /<!-- pavo:meta \{"sha":"abc"/);
+});
+
+test('meta マーカーは extractLastReviewedSha で roundtrip する', () => {
+  const sha = 'f'.repeat(40);
+  const body = buildReviewBody({
+    summary: 'サマリ',
+    demoted: [],
+    meta: { sha, instructions: 'default', model: 'sonnet' },
+  });
+  const reviews = [{ author: { login: 'k35o-bot' }, body }];
+  assert.equal(extractLastReviewedSha(reviews, 'k35o-bot[bot]'), sha);
 });

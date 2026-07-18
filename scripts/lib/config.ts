@@ -53,7 +53,7 @@ function parseBool(value: unknown, fallback: boolean): boolean {
   return String(value).toLowerCase() === 'true';
 }
 
-function parseList(value: unknown): string[] {
+export function parseList(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String);
   if (typeof value !== 'string' || value.trim() === '') return [];
   return value

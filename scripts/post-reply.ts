@@ -9,9 +9,9 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { addStepSummary, notice, warning } from './lib/actions.ts';
-import { sameLogin } from './lib/bot.ts';
-import { gh, ghGraphql, ghJson } from './lib/gh.ts';
-import { requireEnv } from './env.ts';
+import { gh, ghJson } from './lib/gh.ts';
+import { resolveThreadsByRootIds } from './lib/threads.ts';
+import { requireEnv } from './lib/env.ts';
 
 const LEARNINGS_PATH = '.github/pavo-learnings.md';
 // A dedicated branch, not the default branch: rulesets like "changes must be
@@ -95,48 +95,6 @@ function saveLearning(repo: string, prNumber: string, learning: string): string 
   return null;
 }
 
-function resolveThread(repo: string, prNumber: string, rootId: string, botName: string): boolean {
-  const [owner, name] = repo.split('/');
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              id
-              isResolved
-              comments(first: 1) { nodes { databaseId author { login } } }
-            }
-          }
-        }
-      }
-    }`;
-  let cursor: string | null = null;
-  for (let page = 0; page < 10; page += 1) {
-    const data: any = ghGraphql(query, {
-      owner: owner!,
-      name: name!,
-      number: Number(prNumber),
-      ...(cursor ? { cursor } : {}),
-    });
-    const connection = data.repository.pullRequest.reviewThreads;
-    for (const thread of connection.nodes) {
-      const root = thread.comments.nodes[0];
-      if (root?.databaseId !== Number(rootId)) continue;
-      if (!sameLogin(root.author?.login, botName) || thread.isResolved) return false;
-      ghGraphql(
-        'mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id } } }',
-        { threadId: thread.id },
-      );
-      return true;
-    }
-    if (!connection.pageInfo.hasNextPage) break;
-    cursor = connection.pageInfo.endCursor;
-  }
-  return false;
-}
-
 function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
@@ -173,7 +131,7 @@ function main(): void {
 
   let resolved = false;
   if (output.resolve_thread === true) {
-    resolved = resolveThread(repo, prNumber, rootId, botName);
+    resolved = resolveThreadsByRootIds(repo, prNumber, botName, [Number(rootId)]) > 0;
     if (resolved) notice(`Resolved thread ${rootId}.`);
   }
 

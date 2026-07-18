@@ -13,12 +13,12 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { addStepSummary, notice, warning } from './lib/actions.ts';
-import { sameLogin } from './lib/bot.ts';
 import { severityRank } from './lib/config.ts';
-import { gh, ghGraphql, ghJson, ghPaginate } from './lib/gh.ts';
+import { gh, ghJson, ghPaginate } from './lib/gh.ts';
 import { matchesAnyGlob } from './lib/glob.ts';
 import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts';
-import { requireEnv } from './env.ts';
+import { resolveThreadsByRootIds } from './lib/threads.ts';
+import { requireEnv } from './lib/env.ts';
 import type { PavoConfig, ReviewFinding, Severity } from './lib/types.ts';
 
 const CONFIDENCE_THRESHOLD = 80;
@@ -209,61 +209,6 @@ function dismissStaleApprovals(
   }
 }
 
-function resolveThreads(
-  repo: string,
-  prNumber: string,
-  botName: string,
-  rootIds: number[] | null | undefined,
-): number {
-  if (!rootIds?.length) return 0;
-  const [owner, name] = repo.split('/') as [string, string];
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              id
-              isResolved
-              comments(first: 1) { nodes { databaseId author { login } } }
-            }
-          }
-        }
-      }
-    }`;
-  const wanted = new Set(rootIds.slice(0, RESOLVE_LIMIT).map(Number));
-  let resolvedCount = 0;
-  let cursor: string | null = null;
-  for (let page = 0; page < 10; page += 1) {
-    const data: any = ghGraphql(query, {
-      owner,
-      name,
-      number: Number(prNumber),
-      ...(cursor ? { cursor } : {}),
-    });
-    const connection = data.repository.pullRequest.reviewThreads;
-    for (const thread of connection.nodes) {
-      const root = thread.comments.nodes[0];
-      if (!root || !wanted.has(root.databaseId)) continue;
-      // Only threads Pavo itself started: never auto-resolve human discussions.
-      if (!sameLogin(root.author?.login, botName) || thread.isResolved) continue;
-      try {
-        ghGraphql(
-          'mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id } } }',
-          { threadId: thread.id },
-        );
-        resolvedCount += 1;
-      } catch (error) {
-        warning(`Failed to resolve thread ${thread.id}: ${(error as Error).message}`);
-      }
-    }
-    if (!connection.pageInfo.hasNextPage) break;
-    cursor = connection.pageInfo.endCursor;
-  }
-  return resolvedCount;
-}
-
 function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
@@ -279,17 +224,14 @@ function main(): void {
   const fileLines = fetchFileLines(repo, prNumber);
   const { inline, demoted, dropped } = partitionComments(output.comments, config, fileLines);
   const event = decideEvent(output.verdict, inline, demoted, config);
-  const body = buildReviewBody({
-    summary: output.summary,
-    demoted,
-    meta: {
-      sha: headSha,
-      instructions: config.instructions,
-      model: config.model,
-      ref: process.env.PAVO_REF ?? '',
-      run: process.env.RUN_URL ?? '',
-    },
-  });
+  const meta = {
+    sha: headSha,
+    instructions: config.instructions,
+    model: config.model,
+    ref: process.env.PAVO_REF ?? '',
+    run: process.env.RUN_URL ?? '',
+  };
+  const body = buildReviewBody({ summary: output.summary, demoted, meta });
 
   const payload = {
     commit_id: headSha,
@@ -307,6 +249,7 @@ function main(): void {
   };
 
   let review;
+  let postedInline = payload.comments.length;
   try {
     review = postReview(repo, prNumber, payload);
   } catch (error) {
@@ -317,24 +260,20 @@ function main(): void {
     review = postReview(repo, prNumber, {
       commit_id: headSha,
       event,
-      body: buildReviewBody({
-        summary: output.summary,
-        demoted: [...salvaged, ...demoted],
-        meta: {
-          sha: headSha,
-          instructions: config.instructions,
-          model: config.model,
-          ref: process.env.PAVO_REF ?? '',
-          run: process.env.RUN_URL ?? '',
-        },
-      }),
+      body: buildReviewBody({ summary: output.summary, demoted: [...salvaged, ...demoted], meta }),
       comments: [],
     });
+    postedInline = 0;
   }
-  notice(`Posted review ${review.id} (${event}) with ${payload.comments.length} inline comments.`);
+  notice(`Posted review ${review.id} (${event}) with ${postedInline} inline comments.`);
 
   dismissStaleApprovals(repo, prNumber, botName, review.id);
-  const resolvedCount = resolveThreads(repo, prNumber, botName, output.resolved_comment_ids);
+  const resolvedCount = resolveThreadsByRootIds(
+    repo,
+    prNumber,
+    botName,
+    (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
+  );
 
   const counts = { critical: 0, warning: 0, suggestion: 0, praise: 0 };
   for (const comment of inline) counts[comment.severity] += 1;

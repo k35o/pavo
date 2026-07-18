@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { resolveInstructionFiles } from '../scripts/lib/instructions.ts';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 test('index.json のすべてのエントリと依存に対応する .md が存在する', () => {
   const manifest = JSON.parse(
@@ -43,6 +44,18 @@ test('未知の instruction 名は throw する（黙って観点が欠けない
   assert.throws(() => resolveInstructionFiles(ROOT, 'defualt'), /Unknown instruction/);
 });
 
+test('循環依存は throw する', () => {
+  const actionPath = fs.mkdtempSync(path.join(os.tmpdir(), 'pavo-cycle-'));
+  fs.mkdirSync(path.join(actionPath, 'instructions'));
+  fs.writeFileSync(
+    path.join(actionPath, 'instructions/index.json'),
+    JSON.stringify({ a: ['b'], b: ['a'] }),
+  );
+  fs.writeFileSync(path.join(actionPath, 'instructions/a.md'), '# a');
+  fs.writeFileSync(path.join(actionPath, 'instructions/b.md'), '# b');
+  assert.throws(() => resolveInstructionFiles(actionPath, 'a'), /Circular instruction dependency/);
+});
+
 test('workspace 相対の ./ エントリを解決する', () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pavo-test-'));
   fs.mkdirSync(path.join(workspace, 'docs'), { recursive: true });
@@ -69,6 +82,21 @@ test('workspace 外を指す symlink の ./ エントリは拒否する', () => 
     () => resolveInstructionFiles(ROOT, './link.md', { workspace }),
     /escapes the workspace/,
   );
+});
+
+test('instructions/*.md は常時ロード分を除きすべて index.json に載っている', () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'instructions/index.json'), 'utf8'),
+  ) as Record<string, string[]>;
+  const alwaysLoaded = new Set(['system', 'formatting', 'conversation']);
+  const names = fs
+    .readdirSync(path.join(ROOT, 'instructions'))
+    .filter((file) => file.endsWith('.md'))
+    .map((file) => file.replace(/\.md$/, ''))
+    .filter((name) => !alwaysLoaded.has(name));
+  for (const name of names) {
+    assert.ok(Object.hasOwn(manifest, name), `instructions/${name}.md が index.json にない`);
+  }
 });
 
 test('README の観点テーブルに存在しない観点名がない', () => {

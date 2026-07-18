@@ -21,9 +21,10 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { setOutputs, notice } from './lib/actions.ts';
-import { resolveConfig, type RepoConfig } from './lib/config.ts';
+import { normalizeLogin } from './lib/bot.ts';
+import { parseList, resolveConfig, type RepoConfig } from './lib/config.ts';
 import { ghJson } from './lib/gh.ts';
-import { requireEnv } from './env.ts';
+import { requireEnv } from './lib/env.ts';
 
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const COMMAND_PATTERN = /^\/pavo(?:\s+review)?\s*$/;
@@ -66,10 +67,6 @@ export type GateDecision =
 
 const skip = (reason: string): GateDecision => ({ mode: 'skip', reason });
 
-function normalizeBotLogin(login: string): string {
-  return login.replace(/\[bot\]$/, '');
-}
-
 function labelNames(labels: { name: string }[] | undefined): string[] {
   return (labels ?? []).map((label) => label.name);
 }
@@ -95,7 +92,7 @@ export function decide(event: GateEvent, options: GateOptions, deps: GateDeps): 
   const sender = payload.sender ?? {};
   if (sender.type === 'Bot') {
     if (sender.login === botName) return skip('event triggered by Pavo itself');
-    if (!allowBots.includes(normalizeBotLogin(sender.login ?? ''))) {
+    if (!allowBots.includes(normalizeLogin(sender.login ?? ''))) {
       return skip(`sender is a bot not in allow_bots (${sender.login})`);
     }
   }
@@ -224,10 +221,7 @@ function main(): void {
       repository,
       skipLabel: process.env.SKIP_LABEL || 'pavo:skip',
       reviewDrafts: config.reviewDrafts,
-      allowBots: (process.env.ALLOW_BOTS ?? '')
-        .split(',')
-        .map((name) => normalizeBotLogin(name.trim()))
-        .filter(Boolean),
+      allowBots: parseList(process.env.ALLOW_BOTS).map(normalizeLogin).filter(Boolean),
       disabled: (process.env.PAVO_DISABLED || '').toLowerCase() === 'true',
     },
     {

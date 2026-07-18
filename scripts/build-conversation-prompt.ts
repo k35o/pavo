@@ -15,11 +15,14 @@ import { fileURLToPath } from 'node:url';
 
 import { setOutputs } from './lib/actions.ts';
 import { ghJson, ghPaginate } from './lib/gh.ts';
-import { requireEnv } from './env.ts';
+import {
+  prDescriptionSection,
+  readIfExists,
+  repoContextSection,
+  sanitizeUntrusted,
+} from './lib/prompt.ts';
+import { requireEnv } from './lib/env.ts';
 import type { PavoConfig } from './lib/types.ts';
-
-const sanitizeUntrusted = (text: string | null | undefined): string =>
-  (text ?? '').replaceAll('</pavo-', '<\\/pavo-');
 
 function languageSection(language: string): string {
   if (language === 'ja') return '## 出力言語\n\n返答は日本語で書いてください。\n';
@@ -70,22 +73,12 @@ export function buildConversationPrompt({
       'PR の head commit は現在のワーキングディレクトリにチェックアウト済みです。\n',
   );
 
-  sections.push(
-    '## PR タイトルと description\n\n' +
-      '<pavo-pr-description>\n' +
-      `タイトル: ${sanitizeUntrusted(prTitle) || '(なし)'}\n\n` +
-      `${sanitizeUntrusted(prBody) || '(empty)'}\n` +
-      '</pavo-pr-description>\n',
-  );
+  sections.push(prDescriptionSection(prTitle, prBody));
 
   sections.push(languageSection(config.language));
 
-  const repoContext: string[] = [];
-  if (repoContextMd) repoContext.push(repoContextMd.trimEnd());
-  if (config.extraPrompt) repoContext.push(config.extraPrompt.trimEnd());
-  if (repoContext.length > 0) {
-    sections.push(`## このリポジトリの追加コンテキスト\n\n${repoContext.join('\n\n')}\n`);
-  }
+  const repoContext = repoContextSection(repoContextMd, config.extraPrompt);
+  if (repoContext) sections.push(repoContext);
 
   sections.push(
     '## 対象コード\n\n' +
@@ -153,10 +146,7 @@ function main(): void {
     root,
     thread,
     botName,
-    repoContextMd:
-      repoContextFile && fs.existsSync(repoContextFile)
-        ? fs.readFileSync(repoContextFile, 'utf8')
-        : null,
+    repoContextMd: repoContextFile ? readIfExists(repoContextFile) : null,
   });
   setOutputs({ skip: 'false', prompt });
 }

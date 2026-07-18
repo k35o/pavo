@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { setOutputs, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
-import { ghGraphql, ghJson, ghPaginate } from './lib/gh.ts';
+import { ghJson, ghPaginate, ghPaginatePrConnection } from './lib/gh.ts';
 import type {
   ChangedFileEntry,
   CompareInfo,
@@ -29,7 +29,7 @@ import type {
   ThreadComment,
   ThreadSummary,
 } from './lib/types.ts';
-import { requireEnv } from './env.ts';
+import { requireEnv } from './lib/env.ts';
 
 const BODY_LIMIT = 400;
 const THREAD_LIMIT = 60;
@@ -45,84 +45,37 @@ const truncate = (body: string | null | undefined, limit: number = BODY_LIMIT): 
   return text.length > limit ? `${text.slice(0, limit)}…(truncated)` : text;
 };
 
-function paginateGraphql(
-  buildQuery: (cursor: string | null) => any,
-  extract: (data: any) => { nodes: any[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } },
-): any[] {
-  const nodes: any[] = [];
-  let cursor: string | null = null;
-  for (let page = 0; page < 20; page += 1) {
-    const data = buildQuery(cursor);
-    const connection = extract(data);
-    nodes.push(...connection.nodes);
-    if (!connection.pageInfo.hasNextPage) break;
-    cursor = connection.pageInfo.endCursor;
-  }
-  return nodes;
-}
-
 function fetchThreads(owner: string, name: string, number: number): any[] {
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 50, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              isResolved
-              isOutdated
-              path
-              line
-              originalLine
-              comments(first: ${REPLIES_PER_THREAD}) {
-                totalCount
-                nodes { databaseId author { login } body }
-              }
-            }
-          }
-        }
-      }
-    }`;
-  return paginateGraphql(
-    (cursor) => ghGraphql(query, { owner, name, number, ...(cursor ? { cursor } : {}) }),
-    (data) => data.repository.pullRequest.reviewThreads,
-  );
+  return ghPaginatePrConnection(owner, name, number, {
+    field: 'reviewThreads',
+    first: 50,
+    selection: `
+      isResolved
+      isOutdated
+      path
+      line
+      originalLine
+      comments(first: ${REPLIES_PER_THREAD}) {
+        totalCount
+        nodes { databaseId author { login } body }
+      }`,
+  });
 }
 
 function fetchReviews(owner: string, name: string, number: number): any[] {
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviews(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { databaseId author { login } state body submittedAt }
-          }
-        }
-      }
-    }`;
-  return paginateGraphql(
-    (cursor) => ghGraphql(query, { owner, name, number, ...(cursor ? { cursor } : {}) }),
-    (data) => data.repository.pullRequest.reviews,
-  );
+  return ghPaginatePrConnection(owner, name, number, {
+    field: 'reviews',
+    first: 100,
+    selection: 'databaseId author { login } state body submittedAt',
+  });
 }
 
 function fetchIssueComments(owner: string, name: string, number: number): any[] {
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          comments(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { author { login } body }
-          }
-        }
-      }
-    }`;
-  return paginateGraphql(
-    (cursor) => ghGraphql(query, { owner, name, number, ...(cursor ? { cursor } : {}) }),
-    (data) => data.repository.pullRequest.comments,
-  );
+  return ghPaginatePrConnection(owner, name, number, {
+    field: 'comments',
+    first: 100,
+    selection: 'author { login } body',
+  });
 }
 
 /**
@@ -268,7 +221,6 @@ function main(): void {
     changedFiles,
   };
 
-  fs.mkdirSync(outDir, { recursive: true });
   const contextFile = path.join(outDir, 'context.json');
   fs.writeFileSync(contextFile, JSON.stringify(context, null, 2));
   notice(

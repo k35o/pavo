@@ -6,11 +6,12 @@
 // Optional env: PR_LIMIT (default 20)
 
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import { addStepSummary } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
-import { ghGraphql, ghJson } from './lib/gh.ts';
-import { requireEnv } from './env.ts';
+import { ghJson, ghPaginatePrConnection } from './lib/gh.ts';
+import { requireEnv } from './lib/env.ts';
 
 interface ThreadStats {
   threads: number;
@@ -21,47 +22,29 @@ interface ThreadStats {
 
 function fetchThreadStats(repo: string, prNumber: number, botName: string): ThreadStats {
   const [owner, name] = repo.split('/') as [string, string];
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              isResolved
-              comments(first: 1) {
-                nodes {
-                  author { login }
-                  reactionGroups { content reactors { totalCount } }
-                }
-              }
-            }
-          }
+  const threads = ghPaginatePrConnection(owner, name, prNumber, {
+    field: 'reviewThreads',
+    first: 100,
+    selection: `
+      isResolved
+      comments(first: 1) {
+        nodes {
+          author { login }
+          reactionGroups { content reactors { totalCount } }
         }
-      }
-    }`;
+      }`,
+    maxPages: 10,
+  });
   const stats: ThreadStats = { threads: 0, resolved: 0, thumbsUp: 0, thumbsDown: 0 };
-  let cursor: string | null = null;
-  for (let page = 0; page < 10; page += 1) {
-    const data: any = ghGraphql(query, {
-      owner,
-      name,
-      number: prNumber,
-      ...(cursor ? { cursor } : {}),
-    });
-    const connection = data.repository.pullRequest.reviewThreads;
-    for (const thread of connection.nodes) {
-      const root = thread.comments.nodes[0];
-      if (!sameLogin(root?.author?.login, botName)) continue;
-      stats.threads += 1;
-      if (thread.isResolved) stats.resolved += 1;
-      for (const group of root.reactionGroups ?? []) {
-        if (group.content === 'THUMBS_UP') stats.thumbsUp += group.reactors.totalCount;
-        if (group.content === 'THUMBS_DOWN') stats.thumbsDown += group.reactors.totalCount;
-      }
+  for (const thread of threads) {
+    const root = thread.comments.nodes[0];
+    if (!sameLogin(root?.author?.login, botName)) continue;
+    stats.threads += 1;
+    if (thread.isResolved) stats.resolved += 1;
+    for (const group of root.reactionGroups ?? []) {
+      if (group.content === 'THUMBS_UP') stats.thumbsUp += group.reactors.totalCount;
+      if (group.content === 'THUMBS_DOWN') stats.thumbsDown += group.reactors.totalCount;
     }
-    if (!connection.pageInfo.hasNextPage) break;
-    cursor = connection.pageInfo.endCursor;
   }
   return stats;
 }
@@ -98,4 +81,6 @@ function main(): void {
   addStepSummary(report);
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}
