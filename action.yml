@@ -259,13 +259,15 @@ runs:
     # ===== failure notification =====
 
     # A red Actions badge is easy to miss in solo operation; leave a trace on
-    # the PR itself. `|| true` — never mask the original failure.
-    - if: failure() && steps.gate.outputs.mode != 'skip' && steps.gate.outputs.pr_number != ''
+    # the PR itself. `|| true` — never mask the original failure. The event
+    # payload fallback covers gate crashing before it could emit pr_number
+    # (e.g. invalid .github/pavo.json).
+    - if: failure() && steps.gate.outputs.mode != 'skip' && (steps.gate.outputs.pr_number || github.event.pull_request.number || github.event.issue.number)
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         REPO: ${{ github.repository }}
-        PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+        PR_NUMBER: ${{ steps.gate.outputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         set -euo pipefail
