@@ -103,19 +103,52 @@ runs:
         echo "name=${name}" >> "$GITHUB_OUTPUT"
         echo "id=${id}" >> "$GITHUB_OUTPUT"
 
-    # ===== review path =====
+    # The claude_args block is the security boundary for both Claude
+    # invocations (read-only tools, .git/ deny, no PR-side settings), so it is
+    # defined exactly once. MODEL comes from gate so the pavo:deep label
+    # override applies. --setting-sources user: never load .claude/settings.json
+    # (hooks) from the checked-out PR. Read/Grep are denied on .git/ because
+    # claude-code-action configures git auth with the App token in .git/config.
+    # The allowlist has no write or gh-api tools; posting is done by Pavo's
+    # scripts.
+    - id: claude-args
+      if: steps.gate.outputs.mode != 'skip'
+      shell: bash
+      env:
+        MODE: ${{ steps.gate.outputs.mode }}
+        MODEL: ${{ steps.gate.outputs.model }}
+      run: |
+        set -euo pipefail
+        case "${MODE}" in
+          review) max_turns=60 schema=review.json ;;
+          convo) max_turns=30 schema=reply.json ;;
+          *) echo "::error::unexpected mode ${MODE}"; exit 1 ;;
+        esac
+        delim="PAVO_ARGS_$(openssl rand -hex 16)"
+        {
+          echo "claude_args<<${delim}"
+          echo "--model ${MODEL}"
+          echo "--max-turns ${max_turns}"
+          echo "--setting-sources user"
+          echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
+          echo "--disallowedTools \"Read(./.git/**),Grep(./.git/**)\""
+          echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/${schema}")'"
+          echo "${delim}"
+        } >> "$GITHUB_OUTPUT"
 
     # The head commit (not the transient merge ref): what `gh pr diff` shows,
     # what Read sees, and what inline comment anchors refer to must all be the
     # same commit. persist-credentials:false keeps the checkout token out of
     # .git/config; claude-code-action still writes its own git auth there, so
     # the claude steps below additionally deny Read on .git/.
-    - if: steps.gate.outputs.mode == 'review'
+    - if: steps.gate.outputs.mode != 'skip'
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         ref: ${{ steps.gate.outputs.head_sha }}
         fetch-depth: 1
         persist-credentials: false
+
+    # ===== review path =====
 
     - id: context
       if: steps.gate.outputs.mode == 'review'
@@ -146,31 +179,9 @@ runs:
         ON_DEMAND: ${{ steps.gate.outputs.on_demand }}
         REPO_CONTEXT_FILE: ${{ steps.gate.outputs.repo_context_file }}
         LEARNINGS_FILE: ${{ steps.gate.outputs.learnings_file }}
-        MODEL: ${{ steps.gate.outputs.model }}
       run: |
         set -euo pipefail
-        delim="PAVO_PROMPT_$(openssl rand -hex 16)"
-        {
-          echo "prompt<<${delim}"
-          node "${GITHUB_ACTION_PATH}/scripts/build-review-prompt.ts"
-          echo
-          echo "${delim}"
-        } >> "$GITHUB_OUTPUT"
-        {
-          echo "claude_args<<${delim}"
-          echo "--model ${MODEL}"
-          echo "--max-turns 60"
-          echo "--setting-sources user"
-          echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
-          echo "--disallowedTools \"Read(./.git/**),Grep(./.git/**)\""
-          echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/review.json")'"
-          echo "${delim}"
-        } >> "$GITHUB_OUTPUT"
-      # MODEL comes from gate so the pavo:deep label override applies.
-      # --setting-sources user: never load .claude/settings.json (hooks) from
-      # the checked-out PR. Read/Grep are denied on .git/ because claude-code-action
-      # configures git auth with the App token in .git/config. The allowlist has
-      # no write or gh-api tools; the review is posted by post-review.ts.
+        node "${GITHUB_ACTION_PATH}/scripts/build-review-prompt.ts"
 
     - id: claude-review
       if: steps.gate.outputs.mode == 'review'
@@ -182,7 +193,7 @@ runs:
         bot_name: ${{ steps.bot.outputs.name }}
         allowed_bots: ${{ inputs.allow_bots }}
         prompt: ${{ steps.review-prompt.outputs.prompt }}
-        claude_args: ${{ steps.review-prompt.outputs.claude_args }}
+        claude_args: ${{ steps.claude-args.outputs.claude_args }}
 
     - if: steps.gate.outputs.mode == 'review'
       shell: bash
@@ -202,13 +213,6 @@ runs:
 
     # ===== conversation path =====
 
-    - if: steps.gate.outputs.mode == 'convo'
-      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      with:
-        ref: ${{ steps.gate.outputs.head_sha }}
-        fetch-depth: 1
-        persist-credentials: false
-
     - id: convo-prompt
       if: steps.gate.outputs.mode == 'convo'
       shell: bash
@@ -223,21 +227,9 @@ runs:
         ROOT_ID: ${{ steps.gate.outputs.root_id }}
         BOT_NAME: ${{ steps.bot.outputs.name }}
         REPO_CONTEXT_FILE: ${{ steps.gate.outputs.repo_context_file }}
-        MODEL: ${{ steps.gate.outputs.model }}
       run: |
         set -euo pipefail
         node "${GITHUB_ACTION_PATH}/scripts/build-conversation-prompt.ts"
-        delim="PAVO_ARGS_$(openssl rand -hex 16)"
-        {
-          echo "claude_args<<${delim}"
-          echo "--model ${MODEL}"
-          echo "--max-turns 30"
-          echo "--setting-sources user"
-          echo "--allowedTools \"Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*)\""
-          echo "--disallowedTools \"Read(./.git/**),Grep(./.git/**)\""
-          echo "--json-schema '$(jq -c . "${GITHUB_ACTION_PATH}/scripts/schemas/reply.json")'"
-          echo "${delim}"
-        } >> "$GITHUB_OUTPUT"
 
     - id: claude-convo
       if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
@@ -249,7 +241,7 @@ runs:
         bot_name: ${{ steps.bot.outputs.name }}
         allowed_bots: ${{ inputs.allow_bots }}
         prompt: ${{ steps.convo-prompt.outputs.prompt }}
-        claude_args: ${{ steps.convo-prompt.outputs.claude_args }}
+        claude_args: ${{ steps.claude-args.outputs.claude_args }}
 
     - if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
       shell: bash

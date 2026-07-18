@@ -1,9 +1,9 @@
 // Build the review prompt for Pavo's claude-code-action invocation.
 //
-// Reads inputs from environment variables and writes the composed prompt to
-// stdout. Claude does NOT post the review itself: it returns a structured
-// JSON result (validated by --json-schema) that post-review.ts turns into a
-// GitHub Review deterministically.
+// Reads inputs from environment variables and emits the composed prompt as
+// the step's `prompt` output. Claude does NOT post the review itself: it
+// returns a structured JSON result (validated by --json-schema) that
+// post-review.ts turns into a GitHub Review deterministically.
 //
 // Required env:
 // - ACTION_PATH: path to pavo repo checkout
@@ -23,7 +23,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { warning } from './lib/actions.ts';
+import { setOutputs, warning } from './lib/actions.ts';
 import { resolveInstructionFiles } from './lib/instructions.ts';
 import {
   prDescriptionSection,
@@ -330,7 +330,7 @@ function main(): void {
     learnings: process.env.LEARNINGS_FILE ? readIfExists(process.env.LEARNINGS_FILE) : null,
   };
 
-  process.stdout.write(buildPromptWithinBudget(params));
+  setOutputs({ prompt: buildPromptWithinBudget(params) });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
