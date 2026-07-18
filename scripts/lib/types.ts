@@ -62,8 +62,16 @@ export interface ChangedFileEntry {
 
 export interface CompareInfo {
   baseSha: string;
-  files: { filename: string; status: string }[];
+  files: { filename: string; status: string; hasPatch?: boolean }[];
   truncated: boolean;
+  /** Directory holding per-file interdiff patches since the last review. */
+  deltaDir?: string | null;
+}
+
+export interface LinkedIssue {
+  number: number;
+  title: string;
+  body: string;
 }
 
 /** collect-context.ts output consumed by build-review-prompt.ts. */
@@ -78,4 +86,6 @@ export interface ReviewContext {
   changedSinceLastReview: CompareInfo | null;
   diffDir: string;
   changedFiles: ChangedFileEntry[];
+  linkedIssues?: LinkedIssue[];
+  commitMessages?: string[];
 }

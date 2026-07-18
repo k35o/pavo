@@ -24,6 +24,15 @@ test('hunk の行番号を両サイドで追跡する', () => {
   assert.deepEqual([...lines.left.keys()], [1, 2, 3, 10, 11]);
 });
 
+test('空行は context 行として両サイドの行番号を進める', () => {
+  // GitHub の patch は空の context 行を ' ' ではなく '' で返すことがある
+  const lines = parsePatchLines(
+    ['@@ -1,5 +1,6 @@', ' const a = 1;', '', '+const b = 2;', ' const c = 3;'].join('\n'),
+  );
+  assert.deepEqual([...lines.right.keys()], [1, 2, 3, 4]);
+  assert.deepEqual([...lines.left.keys()], [1, 2, 3]);
+});
+
 test('diff 内の行アンカーは valid', () => {
   const lines = parsePatchLines(PATCH);
   assert.ok(isValidAnchor({ line: 2, side: 'RIGHT' }, lines));

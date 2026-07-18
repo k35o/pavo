@@ -1,4 +1,4 @@
-// Tiny env-var helper shared by the prompt builders.
+// Tiny env-var helper shared by every entrypoint script.
 
 import process from 'node:process';
 

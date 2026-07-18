@@ -7,19 +7,24 @@
 // stale APPROVEs *after* the new review exists, thread resolution, and metrics.
 //
 // Required env: REPO, PR_NUMBER, HEAD_SHA, BOT_NAME, CONFIG, STRUCTURED_OUTPUT
-// Optional env: RUN_URL, PAVO_REF
+// Optional env: RUN_URL, PAVO_REF, CONTEXT_FILE, VERIFY_OUTPUT
 
+import fs from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { addStepSummary, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { severityRank } from './lib/config.ts';
-import { gh, ghGraphql, ghJson, ghPaginate } from './lib/gh.ts';
+import { gh, ghJson, ghPaginate } from './lib/gh.ts';
 import { matchesAnyGlob } from './lib/glob.ts';
+import { renderFindingMarker } from './lib/markers.ts';
 import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts';
-import { requireEnv } from './env.ts';
-import type { PavoConfig, ReviewFinding, Severity } from './lib/types.ts';
+import { resolveThreadsByRootIds } from './lib/threads.ts';
+import { applyVerifyVerdicts, type VerifyVerdict } from './lib/verify.ts';
+import { requireEnv } from './lib/env.ts';
+import type { PavoConfig, ReviewContext, ReviewFinding, Severity } from './lib/types.ts';
 
 const CONFIDENCE_THRESHOLD = 80;
 const REVIEW_BODY_LIMIT = 60000;
@@ -33,10 +38,31 @@ export const SEVERITY_EMOJI: Record<Severity, string> = {
 };
 
 /**
- * Render one inline comment body: emoji prefix plus optional suggestion fence.
+ * Clean a raw suggestion: a suggestion on deleted lines (side LEFT) can never
+ * be applied, and models sometimes wrap the replacement code in a stray
+ * markdown fence that would otherwise be committed literally.
+ */
+export function sanitizeSuggestion(raw: unknown, side: 'LEFT' | 'RIGHT'): string | undefined {
+  if (!raw || side === 'LEFT') return undefined;
+  const text = String(raw);
+  const fenced = /^```[^\n]*\n([\s\S]*?)\n?```\s*$/.exec(text);
+  return fenced ? fenced[1] : text;
+}
+
+/** A suggestion identical to the current lines would post a no-op commit. */
+export function isNoopSuggestion(suggestion: string, currentLines: string[]): boolean {
+  const proposed = suggestion.replace(/\n$/, '').split('\n');
+  if (proposed.length !== currentLines.length) return false;
+  return proposed.every((line, i) => line.trimEnd() === (currentLines[i] ?? '').trimEnd());
+}
+
+/**
+ * Render one inline comment body: emoji prefix, optional suggestion fence,
+ * and the invisible calibration marker consumed by report-metrics.ts.
  */
 export function renderCommentBody(comment: {
   severity: Severity;
+  confidence: number;
   body: string;
   suggestion?: string;
 }): string {
@@ -46,7 +72,7 @@ export function renderCommentBody(comment: {
     const fence = comment.suggestion.includes('```') ? '````' : '```';
     body += `\n\n${fence}suggestion\n${comment.suggestion.replace(/\n$/, '')}\n${fence}`;
   }
-  return body;
+  return `${body}\n\n${renderFindingMarker(comment.severity, comment.confidence)}`;
 }
 
 /**
@@ -70,16 +96,17 @@ export function partitionComments(
   const threshold = severityRank(config.minSeverity);
 
   for (const raw of rawComments ?? []) {
+    const side = raw.side === 'LEFT' ? 'LEFT' : 'RIGHT';
     const comment: ReviewFinding = {
       path: String(raw.path ?? ''),
       line: Number(raw.line),
-      side: raw.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+      side,
       start_line: raw.start_line == null ? undefined : Number(raw.start_line),
       start_side: raw.start_side === 'LEFT' ? 'LEFT' : raw.start_side === 'RIGHT' ? 'RIGHT' : undefined,
       severity: String(raw.severity ?? 'suggestion') as Severity,
       confidence: Number(raw.confidence ?? 0),
       body: String(raw.body ?? '').trim(),
-      suggestion: raw.suggestion ? String(raw.suggestion) : undefined,
+      suggestion: sanitizeSuggestion(raw.suggestion, side),
     };
     if (!comment.path || !Number.isFinite(comment.line) || !comment.body) {
       dropped.push({ comment, reason: 'malformed' });
@@ -165,6 +192,67 @@ export function buildReviewBody({
   return `${body}\n\n<!-- pavo:meta ${JSON.stringify(meta)} -->`;
 }
 
+/**
+ * A thread may only be resolved when the code it anchors could actually have
+ * changed: its file is in the delta since the last review, or GitHub marked
+ * the thread outdated. Without this, a hallucinated 「解消済み」 silently hides
+ * a real finding behind a resolved thread. When the delta is unknown (first
+ * review, force push) resolution stays allowed — the gate only blocks what is
+ * positively impossible.
+ */
+export function filterResolvableRootIds(
+  rootIds: number[],
+  context: Pick<ReviewContext, 'threads' | 'sameAsLastReview' | 'changedSinceLastReview'> | null,
+): { allowed: number[]; skipped: { rootId: number; reason: string }[] } {
+  if (!context) return { allowed: rootIds, skipped: [] };
+  const changedFiles = context.changedSinceLastReview
+    ? new Set(context.changedSinceLastReview.files.map((file) => file.filename))
+    : null;
+  const allowed: number[] = [];
+  const skipped: { rootId: number; reason: string }[] = [];
+  for (const rootId of rootIds) {
+    const thread = context.threads.find((entry) => entry.rootId === rootId);
+    if (!thread) {
+      skipped.push({ rootId, reason: 'thread not in collected context' });
+    } else if (thread.isOutdated) {
+      allowed.push(rootId);
+    } else if (changedFiles) {
+      if (changedFiles.has(thread.path)) allowed.push(rootId);
+      else skipped.push({ rootId, reason: `file unchanged since last review (${thread.path})` });
+    } else if (context.sameAsLastReview) {
+      skipped.push({ rootId, reason: 'commit unchanged since last review' });
+    } else {
+      allowed.push(rootId);
+    }
+  }
+  return { allowed, skipped };
+}
+
+/**
+ * Drop suggestions identical to the checked-out file content. Runs against
+ * the PR head checkout in cwd; anchors were already validated against the
+ * diff, so the paths are diff filenames, not arbitrary model output.
+ */
+function dropNoopSuggestions(inline: ReviewFinding[]): void {
+  const root = process.cwd();
+  for (const comment of inline) {
+    if (!comment.suggestion || comment.side !== 'RIGHT') continue;
+    const target = path.resolve(root, comment.path);
+    if (!target.startsWith(root + path.sep)) continue;
+    let lines: string[];
+    try {
+      lines = fs.readFileSync(target, 'utf8').split('\n');
+    } catch {
+      continue;
+    }
+    const start = comment.start_line ?? comment.line;
+    if (isNoopSuggestion(comment.suggestion, lines.slice(start - 1, comment.line))) {
+      notice(`Dropped a no-op suggestion at ${comment.path}:${comment.line}`);
+      delete comment.suggestion;
+    }
+  }
+}
+
 function fetchFileLines(repo: string, prNumber: string): Map<string, PatchLines | null> {
   const files = ghPaginate(`repos/${repo}/pulls/${prNumber}/files`);
   const map = new Map<string, PatchLines | null>();
@@ -188,7 +276,7 @@ function dismissStaleApprovals(
 ): void {
   const reviews = ghPaginate(`repos/${repo}/pulls/${prNumber}/reviews`);
   for (const review of reviews) {
-    if (review.user?.login !== botName) continue;
+    if (!sameLogin(review.user?.login, botName)) continue;
     if (review.state !== 'APPROVED') continue;
     if (review.id === keepReviewId) continue;
     const result = gh(
@@ -209,61 +297,6 @@ function dismissStaleApprovals(
   }
 }
 
-function resolveThreads(
-  repo: string,
-  prNumber: string,
-  botName: string,
-  rootIds: number[] | null | undefined,
-): number {
-  if (!rootIds?.length) return 0;
-  const [owner, name] = repo.split('/') as [string, string];
-  const query = `
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              id
-              isResolved
-              comments(first: 1) { nodes { databaseId author { login } } }
-            }
-          }
-        }
-      }
-    }`;
-  const wanted = new Set(rootIds.slice(0, RESOLVE_LIMIT).map(Number));
-  let resolvedCount = 0;
-  let cursor: string | null = null;
-  for (let page = 0; page < 10; page += 1) {
-    const data: any = ghGraphql(query, {
-      owner,
-      name,
-      number: Number(prNumber),
-      ...(cursor ? { cursor } : {}),
-    });
-    const connection = data.repository.pullRequest.reviewThreads;
-    for (const thread of connection.nodes) {
-      const root = thread.comments.nodes[0];
-      if (!root || !wanted.has(root.databaseId)) continue;
-      // Only threads Pavo itself started: never auto-resolve human discussions.
-      if (!sameLogin(root.author?.login, botName) || thread.isResolved) continue;
-      try {
-        ghGraphql(
-          'mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id } } }',
-          { threadId: thread.id },
-        );
-        resolvedCount += 1;
-      } catch (error) {
-        warning(`Failed to resolve thread ${thread.id}: ${(error as Error).message}`);
-      }
-    }
-    if (!connection.pageInfo.hasNextPage) break;
-    cursor = connection.pageInfo.endCursor;
-  }
-  return resolvedCount;
-}
-
 function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
@@ -277,19 +310,33 @@ function main(): void {
   }
 
   const fileLines = fetchFileLines(repo, prNumber);
-  const { inline, demoted, dropped } = partitionComments(output.comments, config, fileLines);
+  const partition = partitionComments(output.comments, config, fileLines);
+  const { inline, demoted, dropped } = partition;
+  dropNoopSuggestions(inline);
+
+  // pavo:deep only — the fresh-context verifier's verdicts arrive here.
+  // Applied before decideEvent so a refuted 🔴/🟡 no longer blocks APPROVE.
+  if (process.env.VERIFY_OUTPUT) {
+    try {
+      const verify = JSON.parse(process.env.VERIFY_OUTPUT) as { verdicts?: VerifyVerdict[] };
+      if (Array.isArray(verify.verdicts)) {
+        const verified = applyVerifyVerdicts(partition, output.comments, verify.verdicts);
+        notice(`Verifier: ${verified.refuted} refuted, ${verified.uncertain} uncertain.`);
+      }
+    } catch (error) {
+      warning(`Ignoring malformed VERIFY_OUTPUT: ${(error as Error).message}`);
+    }
+  }
+
   const event = decideEvent(output.verdict, inline, demoted, config);
-  const body = buildReviewBody({
-    summary: output.summary,
-    demoted,
-    meta: {
-      sha: headSha,
-      instructions: config.instructions,
-      model: config.model,
-      ref: process.env.PAVO_REF ?? '',
-      run: process.env.RUN_URL ?? '',
-    },
-  });
+  const meta = {
+    sha: headSha,
+    instructions: config.instructions,
+    model: config.model,
+    ref: process.env.PAVO_REF ?? '',
+    run: process.env.RUN_URL ?? '',
+  };
+  const body = buildReviewBody({ summary: output.summary, demoted, meta });
 
   const payload = {
     commit_id: headSha,
@@ -307,6 +354,7 @@ function main(): void {
   };
 
   let review;
+  let postedInline = payload.comments.length;
   try {
     review = postReview(repo, prNumber, payload);
   } catch (error) {
@@ -317,24 +365,27 @@ function main(): void {
     review = postReview(repo, prNumber, {
       commit_id: headSha,
       event,
-      body: buildReviewBody({
-        summary: output.summary,
-        demoted: [...salvaged, ...demoted],
-        meta: {
-          sha: headSha,
-          instructions: config.instructions,
-          model: config.model,
-          ref: process.env.PAVO_REF ?? '',
-          run: process.env.RUN_URL ?? '',
-        },
-      }),
+      body: buildReviewBody({ summary: output.summary, demoted: [...salvaged, ...demoted], meta }),
       comments: [],
     });
+    postedInline = 0;
   }
-  notice(`Posted review ${review.id} (${event}) with ${payload.comments.length} inline comments.`);
+  notice(`Posted review ${review.id} (${event}) with ${postedInline} inline comments.`);
 
   dismissStaleApprovals(repo, prNumber, botName, review.id);
-  const resolvedCount = resolveThreads(repo, prNumber, botName, output.resolved_comment_ids);
+  const contextFile = process.env.CONTEXT_FILE;
+  const context =
+    contextFile && fs.existsSync(contextFile)
+      ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
+      : null;
+  const { allowed, skipped } = filterResolvableRootIds(
+    (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
+    context,
+  );
+  for (const entry of skipped) {
+    notice(`Skipped resolving thread ${entry.rootId}: ${entry.reason}`);
+  }
+  const resolvedCount = resolveThreadsByRootIds(repo, prNumber, botName, allowed);
 
   const counts = { critical: 0, warning: 0, suggestion: 0, praise: 0 };
   for (const comment of inline) counts[comment.severity] += 1;
@@ -344,6 +395,11 @@ function main(): void {
       `| --- | --- | --- | --- | --- | --- | --- | --- |\n` +
       `| ${event} | ${counts.critical} | ${counts.warning} | ${counts.suggestion} | ${counts.praise} | ${demoted.length} | ${dropped.length} | ${resolvedCount} |\n`,
   );
+  if (skipped.length > 0) {
+    addStepSummary(
+      `resolve をスキップ: ${skipped.map((entry) => `${entry.rootId} (${entry.reason})`).join(', ')}\n`,
+    );
+  }
   if (dropped.length > 0) {
     notice(`Dropped ${dropped.length} findings: ${dropped.map((d) => `${d.comment.path}:${d.comment.line} (${d.reason})`).join(', ')}`);
   }

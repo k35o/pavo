@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEFAULT_IGNORE, resolveConfig, severityRank } from '../scripts/lib/config.ts';
+import {
+  DEFAULT_IGNORE,
+  parseRepoConfig,
+  resolveConfig,
+  severityRank,
+} from '../scripts/lib/config.ts';
 
 test('デフォルト値', () => {
   const config = resolveConfig({}, null);
@@ -35,6 +40,20 @@ test('不正な値は throw する', () => {
   assert.throws(() => resolveConfig({ language: 'fr' }, null), /Invalid language/);
   assert.throws(() => resolveConfig({ minSeverity: 'praise' }, null), /Invalid min_severity/);
   assert.throws(() => resolveConfig({}, { model: 'opus; rm -rf /' }), /Invalid model/);
+});
+
+test('pavo.json の未知キーは throw する（typo が黙ってデフォルトに落ちない）', () => {
+  assert.throws(() => resolveConfig({}, { min_severty: 'warning' }), /Unknown key .*min_severty/);
+  // $schema はエディタ支援の慣習として許容する
+  assert.equal(resolveConfig({}, { $schema: 'https://example.com/pavo.json' }).approve, true);
+});
+
+test('parseRepoConfig: オブジェクト以外の JSON と壊れた JSON は throw する', () => {
+  assert.deepEqual(parseRepoConfig('{"approve": false}'), { approve: false });
+  assert.throws(() => parseRepoConfig('["approve"]'), /must be a JSON object/);
+  assert.throws(() => parseRepoConfig('"approve"'), /must be a JSON object/);
+  assert.throws(() => parseRepoConfig('null'), /must be a JSON object/);
+  assert.throws(() => parseRepoConfig('{broken'), /not valid JSON/);
 });
 
 test('severityRank の順序', () => {

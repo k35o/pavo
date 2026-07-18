@@ -36,8 +36,12 @@ export function gh(args: string[], { input, allowFailure = false }: GhOptions = 
       status: failed.status ?? null,
     };
     if (allowFailure) return result;
+    // stderr/stdout are empty when the process never ran (ENOENT, signal);
+    // fall back to the spawn error itself so the failure stays diagnosable.
     throw new Error(
-      `gh ${args.join(' ')} failed (status=${result.status}): ${result.stderr || result.stdout}`,
+      `gh ${args.join(' ')} failed (status=${result.status}): ${
+        result.stderr || result.stdout || (error as Error).message
+      }`,
     );
   }
 }
@@ -95,4 +99,67 @@ export function ghGraphql<T = any>(
     throw new Error(`GraphQL errors: ${JSON.stringify(parsed.errors)}`);
   }
   return parsed.data;
+}
+
+export interface GraphqlConnection<T> {
+  nodes: T[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+/**
+ * Fetch every page of a GraphQL connection. The query must declare a
+ * `$cursor: String` variable and expose `pageInfo { hasNextPage endCursor }`
+ * on the connection that `extract` picks out of each response.
+ */
+export function ghGraphqlPaginate<T = any>(
+  query: string,
+  variables: Record<string, string | number | boolean>,
+  extract: (data: any) => GraphqlConnection<T>,
+  { maxPages = 20 }: { maxPages?: number } = {},
+): T[] {
+  const nodes: T[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages; page += 1) {
+    const data = ghGraphql(query, { ...variables, ...(cursor ? { cursor } : {}) });
+    const connection = extract(data);
+    nodes.push(...connection.nodes);
+    if (!connection.pageInfo.hasNextPage) break;
+    cursor = connection.pageInfo.endCursor;
+  }
+  return nodes;
+}
+
+/**
+ * Fetch every page of a pullRequest connection (`reviewThreads`, `reviews`,
+ * ...). `field`, `first` and `selection` are interpolated into the query
+ * text, so they must be trusted literals — never user input.
+ */
+export function ghPaginatePrConnection<T = any>(
+  owner: string,
+  name: string,
+  number: number,
+  {
+    field,
+    first,
+    selection,
+    maxPages,
+  }: { field: string; first: number; selection: string; maxPages?: number },
+): T[] {
+  const query = `
+    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          ${field}(first: ${first}, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { ${selection} }
+          }
+        }
+      }
+    }`;
+  return ghGraphqlPaginate<T>(
+    query,
+    { owner, name, number },
+    (data) => data.repository.pullRequest[field],
+    maxPages === undefined ? {} : { maxPages },
+  );
 }

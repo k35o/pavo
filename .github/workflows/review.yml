@@ -33,9 +33,12 @@ on:
       language:
         type: string
         default: 'auto'
+      # Booleans are typed as boolean so callers can write natural YAML
+      # (approve: false). They stringify to 'true'/'false' at the composite
+      # action boundary, which parseBool in scripts/lib/config.ts consumes.
       approve:
-        type: string
-        default: 'true'
+        type: boolean
+        default: true
       min_severity:
         type: string
         default: 'suggestion'
@@ -46,8 +49,8 @@ on:
         type: string
         default: ''
       review_drafts:
-        type: string
-        default: 'false'
+        type: boolean
+        default: false
 
 jobs:
   pavo:
