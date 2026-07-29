@@ -35,6 +35,12 @@ export interface Diagnosis {
   summary: string;
 }
 
+type JsonRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): JsonRecord | undefined {
+  return typeof value === 'object' && value !== null ? (value as JsonRecord) : undefined;
+}
+
 function redactSecrets(text: string): string {
   return SECRET_PATTERNS.reduce((acc, pattern) => acc.replaceAll(pattern, '***'), text);
 }
@@ -50,14 +56,16 @@ function fenced(text: string): string {
   return `${fence}\n${text}\n${fence}`;
 }
 
-function lastAssistantText(messages: any[]): string {
+function lastAssistantText(messages: readonly unknown[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
+    const message = asRecord(messages[i]);
     if (message?.type !== 'assistant') continue;
-    const content = message.message?.content;
+    const content = asRecord(message.message)?.content;
     const text = (Array.isArray(content) ? content : [])
-      .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
-      .map((block: any) => block.text)
+      .flatMap((entry) => {
+        const block = asRecord(entry);
+        return block?.type === 'text' && typeof block.text === 'string' ? [block.text] : [];
+      })
       .join('\n')
       .trim();
     if (text) return text;
@@ -69,17 +77,18 @@ function lastAssistantText(messages: any[]): string {
  * Build the ::error:: annotation and step-summary Markdown from the raw
  * message array in claude-execution-output.json.
  */
-export function diagnose(messages: any[]): Diagnosis {
-  const result = messages.findLast((message) => message?.type === 'result');
+export function diagnose(messages: readonly unknown[]): Diagnosis {
+  const result = messages.map(asRecord).findLast((message) => message?.type === 'result');
   const assistantText = lastAssistantText(messages);
 
   const errorTexts: string[] = [];
   if (typeof result?.result === 'string' && result.result.trim()) {
     errorTexts.push(result.result.trim());
   }
-  if (Array.isArray(result?.errors) && result.errors.length > 0) {
+  const errors = result?.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
     errorTexts.push(
-      result.errors
+      errors
         .map((entry: unknown) => (typeof entry === 'string' ? entry : JSON.stringify(entry)))
         .join(', '),
     );
@@ -99,7 +108,7 @@ export function diagnose(messages: any[]): Diagnosis {
     const label =
       result.subtype === 'success' && result.is_error === true
         ? 'subtype "success" は CLI の表示仕様で、is_error: true が実際の結果'
-        : `subtype: ${result.subtype}`;
+        : `subtype: ${String(result.subtype)}`;
     headline = `Claude 実行がエラー終了しました（${label}）。`;
     annotation = `${headline} ${truncate(errorText || assistantText || 'エラーメッセージなし')}`;
     if (result.total_cost_usd === 0 && typeof result.num_turns === 'number' && result.num_turns <= 1) {
@@ -118,7 +127,7 @@ export function diagnose(messages: any[]): Diagnosis {
     lines.push(
       '| subtype | is_error | turns | cost (USD) | duration |',
       '| --- | --- | --- | --- | --- |',
-      `| ${result.subtype ?? '-'} | ${result.is_error ?? '-'} | ${result.num_turns ?? '-'} | ${result.total_cost_usd ?? '-'} | ${duration} |`,
+      `| ${String(result.subtype ?? '-')} | ${String(result.is_error ?? '-')} | ${String(result.num_turns ?? '-')} | ${String(result.total_cost_usd ?? '-')} | ${duration} |`,
       '',
     );
   }
