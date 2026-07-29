@@ -20,9 +20,23 @@ import { addStepSummary, error, warning } from './lib/actions.ts';
 
 const TEXT_LIMIT = 2000;
 
+// The runner masks *registered* secrets in both stdout and the step summary,
+// but this script is the first place raw model/API text reaches either sink,
+// and a token echoed inside an error body was never registered with the
+// masker. Redact recognizable credential shapes ourselves.
+const SECRET_PATTERNS = [
+  /sk-ant-[A-Za-z0-9_-]{8,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+];
+
 export interface Diagnosis {
   annotation: string;
   summary: string;
+}
+
+function redactSecrets(text: string): string {
+  return SECRET_PATTERNS.reduce((acc, pattern) => acc.replaceAll(pattern, '***'), text);
 }
 
 function truncate(text: string): string {
@@ -114,7 +128,7 @@ export function diagnose(messages: any[]): Diagnosis {
   if (assistantText) {
     lines.push('**アシスタント最終メッセージ:**', '', fenced(truncate(assistantText)), '');
   }
-  return { annotation, summary: lines.join('\n') };
+  return { annotation: redactSecrets(annotation), summary: redactSecrets(lines.join('\n')) };
 }
 
 function main(): void {

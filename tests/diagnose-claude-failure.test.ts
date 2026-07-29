@@ -69,6 +69,20 @@ test('長い本文は切り詰める', () => {
   assert.match(annotation, /truncated/);
 });
 
+test('トークン形の文字列は注釈・summary の両方でマスクされる', () => {
+  const { annotation, summary } = diagnose([
+    resultMessage({
+      is_error: true,
+      result: 'auth failed for sk-ant-oat01-abc123XYZ_-456 with ghs_0123456789abcdefTOKEN',
+    }),
+  ]);
+  for (const output of [annotation, summary]) {
+    assert.doesNotMatch(output, /sk-ant-oat01/);
+    assert.doesNotMatch(output, /ghs_0123456789/);
+    assert.match(output, /auth failed for \*\*\* with \*\*\*/);
+  }
+});
+
 test('本文にコードフェンスが含まれても summary のフェンスは壊れない', () => {
   const { summary } = diagnose([
     resultMessage({
