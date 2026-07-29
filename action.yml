@@ -301,6 +301,18 @@ runs:
 
     # ===== failure notification =====
 
+    # The claude step log sanitizes result messages down to counters, so e.g.
+    # a revoked OAuth token surfaces only as total_cost_usd: 0. The real error
+    # text survives in claude-execution-output.json on the runner — extract it
+    # into ::error:: and the step summary. The script never exits non-zero.
+    - if: failure() && (steps.claude-review.outcome == 'failure' || steps.claude-convo.outcome == 'failure')
+      shell: bash
+      env:
+        EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file || steps.claude-convo.outputs.execution_file }}
+      run: |
+        set -euo pipefail
+        node "${GITHUB_ACTION_PATH}/scripts/diagnose-claude-failure.ts"
+
     # A red Actions badge is easy to miss in solo operation; leave a trace on
     # the PR itself. `|| true` — never mask the original failure. The event
     # payload fallback covers gate crashing before it could emit pr_number

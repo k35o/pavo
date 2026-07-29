@@ -41,3 +41,7 @@ export function notice(message: string): void {
 export function warning(message: string): void {
   console.log(`::warning::${message.replaceAll('\n', ' ')}`);
 }
+
+export function error(message: string): void {
+  console.log(`::error::${message.replaceAll('\n', ' ')}`);
+}

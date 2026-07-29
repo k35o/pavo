@@ -190,7 +190,7 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 6. `claude-code-action` — 読み取り専用ツールで diff とコードを調査し、`--json-schema` で検証された構造化 JSON（summary / verdict / comments / resolved_comment_ids）を返す
 7. （`pavo:deep` のみ）`build-verify-prompt.ts` + 2 回目の `claude-code-action` — 独立セッションが 🔴 / 🟡 の各指摘への反証を試み、verdict（confirmed / refuted / uncertain）を返す
 8. `post-review.ts` — confidence・ignore・min_severity・アンカー検証・検証 verdict・suggestion 検証でフィルタし、Review を 1 回だけ POST（422 時は本文へ退避して再送）。成功後に古い APPROVE を dismiss、ファイルが実際に変更されたスレッドのみ resolve、`$GITHUB_STEP_SUMMARY` にメトリクスを出力
-9. 失敗時は PR に「実行が失敗した」コメントと run URL を残す（サイレント失敗しない）
+9. 失敗時は `diagnose-claude-failure.ts` が claude-execution-output.json から実エラー本文を `::error::` / step summary に抽出し、PR に「実行が失敗した」コメントと run URL を残す（サイレント失敗しない）
 
 ### conversation path (`pull_request_review_comment`)
 
@@ -213,6 +213,7 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 | `App token cannot read PR` | App の `Pull requests: Read & write` 権限が欠けている |
 | レビューが来ない（run は緑） | gate のスキップ理由が Actions ログの `::notice::` に出ている（draft / label / bot / association） |
 | レビューが来ない（run が赤） | PR に失敗通知コメントが付く。run URL のログを確認 |
+| `--json-schema was provided but Claude did not return structured_output` | Claude 実行自体の失敗。直後の失敗診断ステップの `::error::` / step summary に result の実エラー本文が出る。cost $0 かつ 1 turn なら `CLAUDE_CODE_OAUTH_TOKEN` の失効・無効を疑う |
 | `Unknown instruction: xxx` | `instructions` の typo。既知の観点名はエラーメッセージに列挙される |
 | learnings が保存されない | App の `Contents` 権限が Read のみ。`Read & write` に変更する |
 | 全リポジトリで一斉に止めたい | Actions variable `PAVO_DISABLED=true`（reusable workflow 経由の場合） |
