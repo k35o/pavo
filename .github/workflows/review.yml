@@ -9,10 +9,14 @@
 #       uses: k35o/pavo/.github/workflows/review.yml@main
 #       with:
 #         instructions: default,nextjs
-#       secrets: inherit
+#       secrets:
+#         K35O_BOT_CLIENT_ID: ${{ secrets.K35O_BOT_CLIENT_ID }}
+#         K35O_BOT_PRIVATE_KEY: ${{ secrets.K35O_BOT_PRIVATE_KEY }}
+#         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 #
 # Expects org/repo secrets: K35O_BOT_CLIENT_ID, K35O_BOT_PRIVATE_KEY,
-# CLAUDE_CODE_OAUTH_TOKEN (use `secrets: inherit`).
+# CLAUDE_CODE_OAUTH_TOKEN. Passing them explicitly (as above) keeps the rest
+# of the caller's secrets out of this workflow; `secrets: inherit` also works.
 name: Pavo Review
 
 on:
@@ -51,6 +55,13 @@ on:
       review_drafts:
         type: boolean
         default: false
+    secrets:
+      K35O_BOT_CLIENT_ID:
+        required: true
+      K35O_BOT_PRIVATE_KEY:
+        required: true
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
 
 jobs:
   pavo:
