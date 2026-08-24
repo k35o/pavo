@@ -104,14 +104,22 @@ test('patch のないファイルへのアンカーは検証不能として inli
 
 test('decideEvent: 🔴/🟡 があると approve でも COMMENT、approve=false なら常に COMMENT', () => {
   const suggestion = comment({ severity: 'suggestion' });
-  assert.equal(decideEvent('approve', [suggestion], [], CONFIG), 'APPROVE');
-  assert.equal(decideEvent('approve', [comment()], [], CONFIG), 'COMMENT');
+  assert.equal(decideEvent('approve', [suggestion], [], CONFIG, false), 'APPROVE');
+  assert.equal(decideEvent('approve', [comment()], [], CONFIG, false), 'COMMENT');
   assert.equal(
-    decideEvent('approve', [], [{ comment: comment({ severity: 'critical' }) }], CONFIG),
+    decideEvent('approve', [], [{ comment: comment({ severity: 'critical' }) }], CONFIG, false),
     'COMMENT',
   );
-  assert.equal(decideEvent('comment', [], [], CONFIG), 'COMMENT');
-  assert.equal(decideEvent('approve', [], [], { ...CONFIG, approve: false }), 'COMMENT');
+  assert.equal(decideEvent('comment', [], [], CONFIG, false), 'COMMENT');
+  assert.equal(decideEvent('approve', [], [], { ...CONFIG, approve: false }, false), 'COMMENT');
+});
+
+test('decideEvent: 自分が作成した PR は APPROVE できないので COMMENT', () => {
+  assert.equal(decideEvent('approve', [], [], CONFIG, true), 'COMMENT');
+  assert.equal(
+    decideEvent('approve', [comment({ severity: 'praise' })], [], CONFIG, true),
+    'COMMENT',
+  );
 });
 
 test('sanitizeSuggestion: LEFT は落とし、誤ラップのフェンスは剥がす', () => {

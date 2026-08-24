@@ -101,6 +101,7 @@ Pavo 自身は Client ID / Private key を受け取らず、`actions/create-gith
 - 各指摘には confidence (0-100) が自己採点され、**80 未満は投稿されない**（praise を除く）。confidence は検証の到達度（反証を試みたか）に紐づけて採点される
 - PR にリンクされた issue（closing references）とコミットメッセージがプロンプトに注入され、「issue の要件を満たしているか」「宣言されていない変更が紛れていないか」の判断材料になる
 - 🔴 / 🟡 が 0 件なら `APPROVE`（🔵 / 👍 の指摘は APPROVE と同時に inline 投稿される）。`approve: false` で常に `COMMENT` にできる — **branch protection の承認数に Pavo を数えたくない場合はこれを使う**
+- PR の作成者が Pavo と同じ App の場合（同じ App で self-hosted Renovate やリリース bot を動かしている構成）は、GitHub が自分の PR への APPROVE を拒否するため自動的に `COMMENT` になる。レビュー自体は通常どおり行われる
 - `pavo:deep` label 付き PR では、レビュー後に**独立した検証セッション**が 🔴 / 🟡 の各指摘への反証を試みる。反証された指摘は「その他の観察」に降格され（反証理由付き）、判断できなかった指摘は投稿されない
 - 新しいレビューの投稿後、同 bot の古い `APPROVED` レビューを dismiss する（投稿「後」なので、実行が失敗しても正当な承認が消えない）
 - 機械的に適用できる小修正は GitHub の suggestion ブロック（1 クリックでコミット可能）として提案される。投稿前に検証され、現在のコードと同一の no-op suggestion や削除行への suggestion は落とされる
