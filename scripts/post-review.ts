@@ -147,13 +147,19 @@ export function partitionComments(
 
 /**
  * @param inline kept inline comments
+ * @param selfAuthored the PR was opened by the same actor Pavo posts as.
+ *   GitHub rejects an APPROVE on your own pull request with a 422, which
+ *   fails the whole POST — including the retry — so the review is lost
+ *   entirely rather than merely unapproved.
  */
 export function decideEvent(
   verdict: string,
   inline: ReviewFinding[],
   demoted: { comment: ReviewFinding }[],
   config: { approve: boolean },
+  selfAuthored: boolean,
 ): 'APPROVE' | 'COMMENT' {
+  if (selfAuthored) return 'COMMENT';
   if (!config.approve || verdict !== 'approve') return 'COMMENT';
   const blocking = [...inline, ...demoted.map((entry) => entry.comment)].some((comment) =>
     ['critical', 'warning'].includes(comment.severity),
@@ -262,6 +268,16 @@ function fetchFileLines(repo: string, prNumber: string): Map<string, PatchLines 
   return map;
 }
 
+/**
+ * Whether the PR was opened by the App Pavo posts as. True whenever the same
+ * App also files PRs — a self-hosted Renovate, a release bot — in which case
+ * every review of those PRs must be a COMMENT.
+ */
+function isSelfAuthored(repo: string, prNumber: string, botName: string): boolean {
+  const pr = ghJson<{ user?: { login?: string } }>(['api', `repos/${repo}/pulls/${prNumber}`]);
+  return sameLogin(pr.user?.login, botName);
+}
+
 function postReview(repo: string, prNumber: string, payload: unknown): any {
   return ghJson(['api', '--method', 'POST', `repos/${repo}/pulls/${prNumber}/reviews`, '--input', '-'], {
     input: JSON.stringify(payload),
@@ -328,7 +344,11 @@ function main(): void {
     }
   }
 
-  const event = decideEvent(output.verdict, inline, demoted, config);
+  const selfAuthored = isSelfAuthored(repo, prNumber, botName);
+  if (selfAuthored) {
+    notice(`PR opened by ${botName} itself — APPROVE is unavailable, posting a COMMENT review.`);
+  }
+  const event = decideEvent(output.verdict, inline, demoted, config, selfAuthored);
   const meta = {
     sha: headSha,
     instructions: config.instructions,
