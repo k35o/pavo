@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { addStepSummary, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { severityRank } from './lib/config.ts';
+import { repairLiteralEscapes } from './lib/escapes.ts';
 import { gh, ghJson, ghPaginate } from './lib/gh.ts';
 import { matchesAnyGlob } from './lib/glob.ts';
 import { renderFindingMarker } from './lib/markers.ts';
@@ -319,7 +320,7 @@ function main(): void {
   const headSha = requireEnv('HEAD_SHA');
   const botName = requireEnv('BOT_NAME');
   const config = JSON.parse(requireEnv('CONFIG')) as PavoConfig;
-  const output = JSON.parse(requireEnv('STRUCTURED_OUTPUT'));
+  const output = repairLiteralEscapes(JSON.parse(requireEnv('STRUCTURED_OUTPUT')));
 
   if (typeof output.summary !== 'string' || !output.summary.trim()) {
     throw new Error('Structured output has no summary — refusing to post an empty review.');
