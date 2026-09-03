@@ -9,6 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { addStepSummary, notice, warning } from './lib/actions.ts';
+import { repairLiteralEscapes } from './lib/escapes.ts';
 import { gh, ghJson } from './lib/gh.ts';
 import { resolveThreadsByRootIds } from './lib/threads.ts';
 import { requireEnv } from './lib/env.ts';
@@ -100,7 +101,7 @@ function main(): void {
   const prNumber = requireEnv('PR_NUMBER');
   const rootId = requireEnv('ROOT_ID');
   const botName = requireEnv('BOT_NAME');
-  const output = JSON.parse(requireEnv('STRUCTURED_OUTPUT')) as ReplyOutput;
+  const output = repairLiteralEscapes(JSON.parse(requireEnv('STRUCTURED_OUTPUT')) as ReplyOutput);
 
   let body = String(output.body ?? '').trim();
   if (!body) throw new Error('Structured output has no reply body.');
