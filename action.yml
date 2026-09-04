@@ -196,7 +196,7 @@ runs:
 
     - id: claude-review
       if: steps.gate.outputs.mode == 'review'
-      uses: anthropics/claude-code-action@a60f3e1db3edbceed2b1e6c6a9d34c36b8a15eba # v1.0.209
+      uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1.0.210
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         github_token: ${{ inputs.github_token }}
@@ -226,7 +226,7 @@ runs:
     - id: claude-verify
       if: steps.gate.outputs.mode == 'review' && steps.gate.outputs.deep == 'true' && steps.verify-prompt.outputs.skip == 'false'
       continue-on-error: true
-      uses: anthropics/claude-code-action@a60f3e1db3edbceed2b1e6c6a9d34c36b8a15eba # v1.0.209
+      uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1.0.210
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         github_token: ${{ inputs.github_token }}
@@ -276,7 +276,7 @@ runs:
 
     - id: claude-convo
       if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
-      uses: anthropics/claude-code-action@a60f3e1db3edbceed2b1e6c6a9d34c36b8a15eba # v1.0.209
+      uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1.0.210
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         github_token: ${{ inputs.github_token }}
