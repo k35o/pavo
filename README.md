@@ -1,6 +1,6 @@
 # Pavo
 
-[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) をラップした composite action と、レビュー観点をまとめた Markdown を 1 リポジトリに集約した、個人用の AI コードレビュー基盤。
+[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) をラップした reusable workflow と、レビュー観点をまとめた Markdown を 1 リポジトリに集約した、個人用の AI コードレビュー基盤。
 
 レビューは caller 側で用意した GitHub App から投稿され、ユーザーがインラインコメントへ返信すると同じ App が会話で応答する。
 
@@ -8,7 +8,7 @@ Claude はレビューを直接投稿しない。**Claude は指摘の構造化 
 
 ## 使い方
 
-推奨は reusable workflow 経由。target repo に caller workflow を 1 つ追加する。
+target repo に、reusable workflow を呼ぶ caller workflow を 1 つ追加する。
 
 ```yaml
 # .github/workflows/pavo.yml
@@ -34,9 +34,7 @@ jobs:
 
 `secrets: inherit` で org secrets（`K35O_BOT_CLIENT_ID` / `K35O_BOT_PRIVATE_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`）がそのまま渡る。concurrency・fork スキップ・timeout・App token 発行は reusable workflow 側に集約されているので、caller の改善は Pavo 側の 1 コミットで全リポジトリに届く。
 
-App token の発行やジョブ構成を自分で制御したい場合は、composite action `k35o/pavo@main` を直接使う（inputs は下の「入力リファレンス」参照）。
-
-`@main` のままだと最新を追従する。固定したい場合は `@<commit-sha>` で 40 文字 SHA を指定する（Renovate 等が自動更新できる形）。
+`@main` のままだと最新を追従する。固定したい場合は `@<commit-sha>` で 40 文字 SHA を指定する（Renovate 等が自動更新できる形）。review.yml は Pavo のスクリプトを自分と同じコミット（`job.workflow_sha`）から取り出すので、この 1 つの pin で実行される Pavo 全体が決まる。
 
 ## セットアップ
 
@@ -57,7 +55,7 @@ App token の発行やジョブ構成を自分で制御したい場合は、comp
 | `K35O_BOT_CLIENT_ID` | GitHub App の Client ID (`Iv23...`) |
 | `K35O_BOT_PRIVATE_KEY` | GitHub App の Private key (PEM 全体) |
 
-Pavo 自身は Client ID / Private key を受け取らず、`actions/create-github-app-token` が発行したインストールトークンと App slug だけを受け取る。
+Client ID / Private key は `actions/create-github-app-token` にだけ渡り、Pavo のスクリプトはそれが発行したインストールトークンと App slug だけを受け取る。
 
 ## トリガー
 
@@ -116,7 +114,7 @@ Pavo 自身は Client ID / Private key を受け取らず、`actions/create-gith
 
 caller workflow を触らずにリポジトリ側で調整したい場合、以下のファイルが読まれる。いずれも **デフォルトブランチの内容**が使われる（PR がレビュー設定を書き換えても、その PR 自身のレビューには効かない。設定変更はデフォルトブランチに merge されてから有効になる）。
 
-- `.github/pavo.json` — 設定。**action inputs より優先**。未知のキーはエラーで落ちる（typo が黙ってデフォルト値に落ちない）
+- `.github/pavo.json` — 設定。**workflow の inputs より優先**。未知のキーはエラーで落ちる（typo が黙ってデフォルト値に落ちない）
 
   ```json
   {
@@ -135,36 +133,31 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 
 ## 入力リファレンス
 
-| 入力 | 必須 | デフォルト | 説明 |
-| --- | --- | --- | --- |
-| `github_token` | ✓ | — | レビュー投稿に使うトークン。通常 `actions/create-github-app-token` の出力 |
-| `app_slug` | ✓ | — | GitHub App の slug |
-| `claude_code_oauth_token` | ✓ | — | Claude Code Max OAuth token |
-| `instructions` | | `default` | カンマ区切りの観点名。依存は自動解決。`./` は対象 repo 相対 |
-| `extra_prompt` | | (なし) | リポジトリ固有の追加コンテキスト |
-| `skip_label` | | `pavo:skip` | この label が付いていると action をスキップ |
-| `model` | | `sonnet` | レビューに使うモデル。PR に `pavo:deep` label が付くと `opus` に切り替わり、指摘の反証セッションも追加実行される |
-| `language` | | `auto` | 出力言語 (`auto` / `ja` / `en`) |
-| `approve` | | `true` | `false` で常に COMMENT（APPROVE を出さない） |
-| `min_severity` | | `suggestion` | inline 投稿する最低 severity。未満は本文に折りたたみ |
-| `ignore_paths` | | (なし) | レビュー対象外 glob の追加（lockfile 等の既定除外に加算） |
-| `allow_bots` | | (なし) | PR をレビューする bot login の許可リスト（カンマ区切り） |
-| `review_drafts` | | `false` | draft PR もレビューする |
-
-reusable workflow (`review.yml`) も同名の inputs を持つ。
+| 入力 | デフォルト | 説明 |
+| --- | --- | --- |
+| `instructions` | `default` | カンマ区切りの観点名。依存は自動解決。`./` は対象 repo 相対 |
+| `extra_prompt` | (なし) | リポジトリ固有の追加コンテキスト |
+| `skip_label` | `pavo:skip` | この label が付いていると Pavo をスキップ |
+| `model` | `sonnet` | レビューに使うモデル。PR に `pavo:deep` label が付くと `opus` に切り替わり、指摘の反証セッションも追加実行される |
+| `language` | `auto` | 出力言語 (`auto` / `ja` / `en`) |
+| `approve` | `true` | `false` で常に COMMENT（APPROVE を出さない） |
+| `min_severity` | `suggestion` | inline 投稿する最低 severity。未満は本文に折りたたみ |
+| `ignore_paths` | (なし) | レビュー対象外 glob の追加（lockfile 等の既定除外に加算） |
+| `allow_bots` | (なし) | PR をレビューする bot login の許可リスト（カンマ区切り） |
+| `review_drafts` | `false` | draft PR もレビューする |
 
 ## レビューを止める
 
 - PR 単位: `pavo:skip` label（`skip_label` で変更可）。`/pavo` コマンドは label より優先される
-- 全体（kill switch）: org / repo の Actions variable `PAVO_DISABLED` を `true` にすると、reusable workflow 経由の全実行が gate で即スキップされる
+- 全体（kill switch）: org / repo の Actions variable `PAVO_DISABLED` を `true` にすると、全実行が gate で即スキップされる
 - 劣化した変更が `@main` に入ってしまったときのロールバック手順:
   1. `PAVO_DISABLED=true` で全停止
-  2. main を revert する。**reusable workflow (`review.yml@main`) 経由の caller は action 本体が常に main 追従**なので、SHA pin で戻せるのは composite action `k35o/pavo@<sha>` を直接使っている caller だけ
+  2. main を revert する。`@main` の caller はすぐ戻る。SHA pin の caller は、劣化した commit に pin を上げていればその pin を戻すか、revert 後の commit まで上げる
   3. 修正を merge してから variable を戻す
 
 ## バージョン管理と CI
 
-- タグやリリース運用は持たず、ブランチか commit SHA で参照する。SHA pin（+ Renovate 追従）が効くのは composite action を直接 `uses: k35o/pavo@<sha>` する場合。reusable workflow 経由は常に `@main` 追従になる
+- タグやリリース運用は持たず、ブランチか commit SHA で参照する。Renovate は SHA pin を `# main` の digest として追従する
 - [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する
 - `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
@@ -203,13 +196,12 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 
 ### dogfooding
 
-[`.github/workflows/pavo.yml`](.github/workflows/pavo.yml) は **`@main` の Pavo** で自 PR をレビューする。`uses: ./` にしない理由: action.yml や instructions を書き換える PR が「書き換え後の自分」に審査されると、レビューを骨抜きにする変更をその変更自身が承認できてしまう。PR 版のコードは ci.yml が検証する。
+[`.github/workflows/pavo.yml`](.github/workflows/pavo.yml) は **`@main` の Pavo** で自 PR をレビューする。`uses: ./` にしない理由: review.yml・scripts・instructions を書き換える PR が「書き換え後の自分」に審査されると、レビューを骨抜きにする変更をその変更自身が承認できてしまう。PR 版のコードは ci.yml が検証する。
 
 ## トラブルシュート
 
 | 症状 | 原因と対処 |
 | --- | --- |
-| `GitHub App user xxx[bot] not found` | `app_slug` の綴り違い。`create-github-app-token` の `app-slug` 出力を使う |
 | `App token cannot read <repo>` | App が対象リポジトリにインストールされていない |
 | `App token cannot read PR` | App の `Pull requests: Read & write` 権限が欠けている |
 | レビューが来ない（run は緑） | gate のスキップ理由が Actions ログの `::notice::` に出ている（draft / label / bot / association） |
@@ -217,4 +209,4 @@ reusable workflow (`review.yml`) も同名の inputs を持つ。
 | `--json-schema was provided but Claude did not return structured_output` | Claude 実行自体の失敗。直後の失敗診断ステップの `::error::` / step summary に result の実エラー本文が出る。cost $0 かつ 1 turn なら `CLAUDE_CODE_OAUTH_TOKEN` の失効・無効を疑う |
 | `Unknown instruction: xxx` | `instructions` の typo。既知の観点名はエラーメッセージに列挙される |
 | learnings が保存されない | App の `Contents` 権限が Read のみ。`Read & write` に変更する |
-| 全リポジトリで一斉に止めたい | Actions variable `PAVO_DISABLED=true`（reusable workflow 経由の場合） |
+| 全リポジトリで一斉に止めたい | Actions variable `PAVO_DISABLED=true` |

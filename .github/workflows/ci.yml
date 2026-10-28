@@ -1,7 +1,7 @@
-# Pavo is consumed at @main by every caller, so a broken merge takes down all
-# reviews at once. This suite is the pre-merge safety net: instruction graph
-# integrity, prompt builders producing sane output for every combination, and
-# the pure logic in gate/post scripts.
+# Every caller picks up main through its review.yml pin bumps, so a broken
+# merge spreads to all reviews. This suite is the pre-merge safety net:
+# instruction graph integrity, prompt builders producing sane output for every
+# combination, and the pure logic in gate/post scripts.
 name: CI
 
 on:

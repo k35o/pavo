@@ -1,7 +1,7 @@
 // Gate: decide from the event payload whether this run reviews, replies, or
 // skips — and resolve the effective per-repo configuration.
 //
-// All trigger logic lives here (not in action.yml conditions) so it can be
+// All trigger logic lives here (not in workflow conditions) so it can be
 // unit-tested against fixture payloads.
 //
 // Repo-side configuration (.github/pavo.json / pavo.md) is read from the

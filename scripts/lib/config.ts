@@ -1,6 +1,6 @@
-// Effective review configuration: defaults <- action inputs <- .github/pavo.json.
+// Effective review configuration: defaults <- workflow inputs <- .github/pavo.json.
 //
-// The repo-side file wins over action inputs so per-repo tuning lives next to
+// The repo-side file wins over workflow inputs so per-repo tuning lives next to
 // the reviewed code instead of in caller workflow YAML.
 
 import type { PavoConfig, Severity } from './types.ts';
