@@ -1,7 +1,7 @@
 # Dogfooding: Pavo's own PRs are reviewed by Pavo.
 #
-# Deliberately `@main`, not `uses: ./` — a PR that edits action.yml or
-# instructions/ must be reviewed by the *current* Pavo, not by the modified
+# Deliberately `@main`, not `uses: ./` — a PR that edits review.yml, scripts/
+# or instructions/ must be reviewed by the *current* Pavo, not by the modified
 # version it is trying to introduce (otherwise a PR could weaken the reviewer
 # and then get approved by its own weakened rules). The PR version is
 # exercised by ci.yml instead.
@@ -27,9 +27,9 @@ jobs:
       # dogfood review doubles as the pre-merge sanity signal for upstream bumps.
       allow_bots: renovate
       extra_prompt: |
-        Pavo 自身のリポジトリです。GitHub composite action と AI レビュー観点 Markdown、
+        Pavo 自身のリポジトリです。GitHub の reusable workflow と AI レビュー観点 Markdown、
         プロンプト生成・レビュー投稿用の Node.js スクリプトで構成されています。
-        - `action.yml` の step 条件・secret/token の扱い
+        - `.github/workflows/review.yml` の step 条件・secret/token の扱い
         - `scripts/*.ts` の堅牢性（gh 呼び出しの失敗処理、エスケープ、境界値）
         - `instructions/*.md` のレビュー観点としての一貫性・抜け漏れ
         - `instructions/index.json` の依存関係定義
