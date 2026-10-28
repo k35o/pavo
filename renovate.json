@@ -8,6 +8,11 @@
       "description": "upstream の挙動変更リスク（structured_output / claude_args / sanitizer）があるため、merge 後の最初の PR で dogfood レビューを確認する",
       "matchPackageNames": ["anthropics/claude-code-action"],
       "addLabels": ["upstream-bump"]
+    },
+    {
+      "description": "pavo.yml の自己参照は @main のまま保つ（理由は pavo.yml のコメント）",
+      "matchPackageNames": ["k35o/pavo"],
+      "pinDigests": false
     }
   ]
 }

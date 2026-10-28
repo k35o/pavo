@@ -5,6 +5,10 @@
 # version it is trying to introduce (otherwise a PR could weaken the reviewer
 # and then get approved by its own weakened rules). The PR version is
 # exercised by ci.yml instead.
+#
+# Not SHA-pinned either (renovate.json turns pinning off for k35o/pavo): a pin
+# to this repository can never name the commit that contains it, and every
+# merged bump would itself be a newer main for the next bump to chase.
 name: Pavo
 
 on:
@@ -20,7 +24,7 @@ jobs:
     # Cheap pre-filter so ordinary PR comments don't spin up a runner just to
     # be skipped by the gate.
     if: ${{ github.event_name != 'issue_comment' || startsWith(github.event.comment.body, '/pavo') }}
-    uses: k35o/pavo/.github/workflows/review.yml@f9d2957287e334bae2f89d88765fdd9c7876ba16 # main
+    uses: k35o/pavo/.github/workflows/review.yml@main
     with:
       instructions: default,github-actions,node
       # Renovate PRs (mainly claude-code-action bumps) get reviewed too — the
