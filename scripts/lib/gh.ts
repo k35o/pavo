@@ -40,10 +40,22 @@ export function gh(args: string[], { input, allowFailure = false }: GhOptions = 
     // fall back to the spawn error itself so the failure stays diagnosable.
     throw new Error(
       `gh ${args.join(' ')} failed (status=${result.status}): ${
-        result.stderr || result.stdout || (error as Error).message
+        failureDetail(result) || (error as Error).message
       }`,
     );
   }
+}
+
+/**
+ * Both streams of a failed call. `gh api` puts only a bare summary such as
+ * "Unprocessable Entity (HTTP 422)" on stderr; the reason GitHub gave is in
+ * the response body, which goes to stdout.
+ */
+export function failureDetail(result: Pick<GhResult, 'stdout' | 'stderr'>): string {
+  return [result.stderr, result.stdout]
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**

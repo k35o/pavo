@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { setOutputs, notice } from './lib/actions.ts';
 import { normalizeLogin, sameLogin } from './lib/bot.ts';
 import { parseList, parseRepoConfig, resolveConfig, type RepoConfig } from './lib/config.ts';
-import { gh, ghJson } from './lib/gh.ts';
+import { failureDetail, gh, ghJson } from './lib/gh.ts';
 import { requireEnv } from './lib/env.ts';
 
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -179,7 +179,7 @@ function fetchRepoFile(repository: string, filePath: string, ref?: string): stri
     // a missing Contents permission, rate limit, outage) must not silently
     // review with the repo settings dropped.
     if (result.stderr.includes('HTTP 404')) return null;
-    throw new Error(`Failed to read ${filePath}: ${result.stderr || result.stdout}`);
+    throw new Error(`Failed to read ${filePath}: ${failureDetail(result)}`);
   }
   const file = JSON.parse(result.stdout) as { content?: string };
   if (!file?.content) return null;

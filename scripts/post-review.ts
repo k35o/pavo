@@ -18,7 +18,7 @@ import { addStepSummary, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { severityRank } from './lib/config.ts';
 import { repairLiteralEscapes } from './lib/escapes.ts';
-import { gh, ghJson, ghPaginate } from './lib/gh.ts';
+import { failureDetail, gh, ghJson, ghPaginate } from './lib/gh.ts';
 import { matchesAnyGlob } from './lib/glob.ts';
 import { renderFindingMarker } from './lib/markers.ts';
 import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts';
@@ -310,7 +310,7 @@ function dismissStaleApprovals(
       { allowFailure: true },
     );
     if (result.ok) notice(`Dismissed stale APPROVE review ${review.id}`);
-    else warning(`Failed to dismiss review ${review.id}: ${result.stderr}`);
+    else warning(`Failed to dismiss review ${review.id}: ${failureDetail(result)}`);
   }
 }
 
