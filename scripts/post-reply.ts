@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import { addStepSummary, notice, warning } from './lib/actions.ts';
 import { repairLiteralEscapes } from './lib/escapes.ts';
-import { gh, ghJson } from './lib/gh.ts';
+import { failureDetail, gh, ghJson } from './lib/gh.ts';
 import { resolveThreadsByRootIds } from './lib/threads.ts';
 import { requireEnv } from './lib/env.ts';
 
@@ -88,7 +88,7 @@ function saveLearning(repo: string, prNumber: string, learning: string): string 
     { input: JSON.stringify(payload), allowFailure: true },
   );
   if (!result.ok) {
-    warning(`Failed to save learning: ${result.stderr}`);
+    warning(`Failed to save learning: ${failureDetail(result)}`);
     return result.stderr.includes('403') || result.stderr.includes('Resource not accessible')
       ? 'App の `Contents: Read & write` 権限が必要です'
       : `保存 API がエラーを返しました: ${result.stderr.slice(0, 200).replaceAll('\n', ' ')}`;
