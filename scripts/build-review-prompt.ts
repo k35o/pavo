@@ -1,9 +1,12 @@
 // Build the review prompt for Pavo's claude-code-action invocation.
 //
 // Reads inputs from environment variables and emits the composed prompt as
-// the step's `prompt` output. Claude does NOT post the review itself: it
-// returns a structured JSON result (validated by --json-schema) that
-// post-review.ts turns into a GitHub Review deterministically.
+// the step's `prompt` output, with `reductions` (JSON array of what was left
+// out to fit the byte budget) and `skip` ('true' when nothing fits, so the
+// review is skipped instead of failing to start). Claude does NOT post the
+// review itself: it returns a structured JSON result (validated by
+// --json-schema) that post-review.ts turns into a GitHub Review
+// deterministically.
 //
 // Required env:
 // - ACTION_PATH: path to pavo repo checkout
@@ -33,12 +36,24 @@ import {
   sanitizeUntrusted,
 } from './lib/prompt.ts';
 import { requireEnv } from './lib/env.ts';
-import type { PavoConfig, ReviewContext } from './lib/types.ts';
+import type { ChangedFileEntry, PavoConfig, ReviewContext } from './lib/types.ts';
 
-// Inputs (prompt included) travel through env vars, which Linux caps around
-// 128KiB per variable. Stay far enough below that the wrapping YAML and the
-// action's own additions cannot push it over.
+// claude-code-action has no file input: its run step receives the prompt as
+// the PROMPT env var and again inside ALL_INPUTS (toJson of every input), and
+// Linux refuses to start a process with any single env entry over 128KiB.
+// The JSON copy is the larger one, so the budget is measured on the
+// JSON-escaped prompt and leaves room for claude_args beside it.
 const PROMPT_BYTE_BUDGET = 90000;
+const FILE_LIST_HEAD = 100;
+
+const promptBytes = (prompt: string): number => Buffer.byteLength(JSON.stringify(prompt));
+
+/** How much of the changed-file list goes into the prompt. */
+type FileListing = 'full' | 'compact' | 'head';
+
+const isRemoved = (file: ChangedFileEntry): boolean => file.status === 'removed';
+const isPureRename = (file: ChangedFileEntry): boolean =>
+  file.status === 'renamed' && file.additions + file.deletions === 0;
 
 function languageSection(language: PavoConfig['language']): string {
   if (language === 'ja') return '## 出力言語\n\nすべての出力は日本語で書いてください。\n';
@@ -197,16 +212,33 @@ function scopeSection(context: ReviewContext | null, onDemand: boolean): string 
   return `## 今回のレビュー範囲\n\n${parts.join('\n\n')}\n`;
 }
 
-function diffFilesSection(context: ReviewContext | null): string | null {
+function diffFilesSection(context: ReviewContext | null, listing: FileListing): string | null {
   if (!context?.changedFiles?.length) return null;
-  const lines = context.changedFiles.map(
+  const all = context.changedFiles;
+  const kept = listing === 'full' ? all : all.filter((file) => !isRemoved(file) && !isPureRename(file));
+  const shown = listing === 'head' ? kept.slice(0, FILE_LIST_HEAD) : kept;
+  const omitted = [
+    listing !== 'full' && all.some(isRemoved) ? `削除 ${all.filter(isRemoved).length} 件` : null,
+    listing !== 'full' && all.some(isPureRename)
+      ? `内容の変わらない rename ${all.filter(isPureRename).length} 件`
+      : null,
+    shown.length < kept.length ? `先頭 ${shown.length} 件以降の ${kept.length - shown.length} 件` : null,
+  ].filter((part) => part !== null);
+  const lines = shown.map(
     (file) =>
       `- \`${file.filename}\` (${file.status}, +${file.additions}/-${file.deletions})` +
       (file.hasPatch ? '' : '（diff ファイルなし — `Read` で現在の内容を確認）'),
   );
+  const listHeading =
+    omitted.length === 0
+      ? '変更ファイル一覧:'
+      : `変更ファイル一覧（全 ${all.length} 件。大きいため${omitted.join('・')}を省略）:`;
   return (
     '## 変更ファイルとファイル別 diff\n\n' +
-    `変更ファイル一覧:\n\n${lines.join('\n')}\n\n` +
+    `${listHeading}\n\n${lines.join('\n') || '- (省略した分のみ)'}\n\n` +
+    (omitted.length === 0
+      ? ''
+      : `全 ${all.length} 件の一覧は \`${context.changedFilesPath}\` にあり（1 行に status・行数・path）、\`Read\` / \`Grep\` で読めます。\n\n`) +
     `各ファイルの diff は \`${context.diffDir}/<path>.diff\` に置いてあり、\`Read\` で読めます。\n` +
     '`gh pr diff` の出力が大きくて途中で切れる場合は、こちらをファイル単位で読んでください。\n'
   );
@@ -245,7 +277,7 @@ export function buildReviewPrompt({
   repoContextMd = null,
   learnings = null,
   conventionsMd = null,
-}: BuildReviewPromptParams): string {
+}: BuildReviewPromptParams, listing: FileListing = 'full'): string {
   const sections: string[] = [];
   const instructionsDir = path.join(actionPath, 'instructions');
 
@@ -301,7 +333,7 @@ export function buildReviewPrompt({
     );
   }
 
-  const diffFiles = diffFilesSection(context);
+  const diffFiles = diffFilesSection(context, listing);
   if (diffFiles) sections.push(diffFiles);
 
   const scope = scopeSection(context, onDemand);
@@ -332,37 +364,62 @@ export function buildReviewPrompt({
   return sections.join('\n---\n\n');
 }
 
-/**
- * Shed conversation context in two stages until the prompt fits the byte
- * budget: resolved threads and comment history first, then the whole
- * conversation. Unresolved Pavo threads survive the first stage so the
- * reviewer still avoids re-posting known findings.
- */
+type ConversationLevel = 'full' | 'slim' | 'none';
+
+function shapeConversation(
+  context: ReviewContext | null,
+  level: ConversationLevel,
+): ReviewContext | null {
+  if (!context || level === 'full') return context;
+  return {
+    ...context,
+    // Unresolved Pavo threads outlast the history so the reviewer still
+    // avoids re-posting known findings.
+    threads:
+      level === 'slim' ? context.threads.filter((thread) => thread.byPavo && !thread.isResolved) : [],
+    reviews: [],
+    issueComments: [],
+    droppedThreads: 0,
+  };
+}
+
+// Cheapest loss first. Each stage changes one thing from the stage before, so
+// a stage that leaves the prompt unchanged had nothing to drop and is not
+// reported.
+const SHRINK_STAGES: { listing: FileListing; conversation: ConversationLevel; reduction: string }[] = [
+  {
+    listing: 'compact',
+    conversation: 'full',
+    reduction: '削除されたファイルと内容の変わらない rename を件数だけにまとめた',
+  },
+  { listing: 'compact', conversation: 'slim', reduction: '解決済みスレッドとコメント履歴を省いた' },
+  { listing: 'head', conversation: 'slim', reduction: `変更ファイルの一覧を先頭 ${FILE_LIST_HEAD} 件に絞った` },
+  { listing: 'head', conversation: 'none', reduction: '既存の会話を省いた' },
+];
+
+export interface BudgetedPrompt {
+  /** null when even the smallest form exceeds the budget. */
+  prompt: string | null;
+  /** What was left out to fit, in the order applied. */
+  reductions: string[];
+}
+
 export function buildPromptWithinBudget(
   params: BuildReviewPromptParams,
   budget: number = PROMPT_BYTE_BUDGET,
-): string {
+): BudgetedPrompt {
   let prompt = buildReviewPrompt(params);
-  if (Buffer.byteLength(prompt) > budget && params.context) {
-    // Conversation history is the only unbounded section; shed it first.
-    warning('Prompt exceeds the byte budget; dropping resolved threads and comment history.');
-    const slimContext = {
-      ...params.context,
-      threads: params.context.threads.filter((thread) => thread.byPavo && !thread.isResolved),
-      reviews: [],
-      issueComments: [],
-      droppedThreads: 0,
-    };
-    prompt = buildReviewPrompt({ ...params, context: slimContext });
-    if (Buffer.byteLength(prompt) > budget) {
-      warning('Prompt still exceeds the byte budget; dropping the conversation context entirely.');
-      prompt = buildReviewPrompt({ ...params, context: { ...slimContext, threads: [] } });
-    }
+  const reductions: string[] = [];
+  for (const stage of SHRINK_STAGES) {
+    if (promptBytes(prompt) <= budget) return { prompt, reductions };
+    const smaller = buildReviewPrompt(
+      { ...params, context: shapeConversation(params.context, stage.conversation) },
+      stage.listing,
+    );
+    if (smaller !== prompt) reductions.push(stage.reduction);
+    prompt = smaller;
   }
-  if (Buffer.byteLength(prompt) > budget) {
-    warning('Prompt exceeds the byte budget even without conversation context; the run may fail.');
-  }
-  return prompt;
+  return { prompt: promptBytes(prompt) <= budget ? prompt : null, reductions };
 }
 
 function main(): void {
@@ -388,7 +445,16 @@ function main(): void {
     conventionsMd: process.env.CONVENTIONS_FILE ? readIfExists(process.env.CONVENTIONS_FILE) : null,
   };
 
-  setOutputs({ prompt: buildPromptWithinBudget(params) });
+  const { prompt, reductions } = buildPromptWithinBudget(params);
+  if (reductions.length > 0) {
+    warning(`Shrank the prompt to fit the byte budget: ${reductions.join(' / ')}`);
+  }
+  if (prompt === null) {
+    warning('Prompt exceeds the byte budget even in its smallest form; skipping the review.');
+    setOutputs({ skip: 'true' });
+    return;
+  }
+  setOutputs({ skip: 'false', prompt, reductions: JSON.stringify(reductions) });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
