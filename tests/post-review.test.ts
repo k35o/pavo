@@ -193,6 +193,33 @@ test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   assert.match(body, /<!-- pavo:meta \{"sha":"abc"/);
 });
 
+test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を本文に書く', () => {
+  const body = buildReviewBody({
+    summary: 'TL;DR: 問題なし',
+    demoted: [],
+    reductions: ['削除されたファイルと内容の変わらない rename を件数だけにまとめた', '解決済みスレッドとコメント履歴を省いた'],
+    meta: { sha: 'abc' },
+  });
+  assert.ok(
+    body.includes(
+      'ℹ️ この PR は大きいため、レビューに渡す情報を縮めました: ' +
+        '削除されたファイルと内容の変わらない rename を件数だけにまとめた、解決済みスレッドとコメント履歴を省いた',
+    ),
+  );
+  assert.ok(!buildReviewBody({ summary: 'TL;DR', demoted: [], meta: {} }).includes('ℹ️'));
+});
+
+test('buildReviewBody: サマリが長くて切り詰めても、縮めた旨は残る', () => {
+  const body = buildReviewBody({
+    summary: 'あ'.repeat(70000),
+    demoted: [],
+    reductions: ['既存の会話を省いた'],
+    meta: { sha: 'abc' },
+  });
+  assert.ok(body.includes('…(truncated)'));
+  assert.ok(body.includes('レビューに渡す情報を縮めました: 既存の会話を省いた'));
+});
+
 test('finding マーカーは parseFindingMarker で roundtrip し、strip で除去できる', () => {
   const body = renderCommentBody(comment({ severity: 'warning', confidence: 87 }));
   assert.deepEqual(parseFindingMarker(body), { severity: 'warning', confidence: 87 });

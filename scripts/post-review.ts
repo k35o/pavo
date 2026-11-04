@@ -7,7 +7,7 @@
 // stale APPROVEs *after* the new review exists, thread resolution, and metrics.
 //
 // Required env: REPO, PR_NUMBER, HEAD_SHA, BOT_NAME, CONFIG, STRUCTURED_OUTPUT
-// Optional env: RUN_URL, PAVO_REF, CONTEXT_FILE, VERIFY_OUTPUT
+// Optional env: RUN_URL, PAVO_REF, CONTEXT_FILE, VERIFY_OUTPUT, PROMPT_REDUCTIONS
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -169,15 +169,20 @@ export function decideEvent(
 }
 
 /**
- * @returns final review body with demoted notes and the meta marker
+ * @param reductions what build-review-prompt.ts left out of the prompt to fit
+ *   claude-code-action's env limit
+ * @returns final review body with demoted notes, the reductions and the meta
+ *   marker
  */
 export function buildReviewBody({
   summary,
   demoted,
+  reductions = [],
   meta,
 }: {
   summary: string;
   demoted: { comment: ReviewFinding; reason: string }[];
+  reductions?: string[];
   meta: Record<string, string>;
 }): string {
   let body = summary.trim();
@@ -195,6 +200,9 @@ export function buildReviewBody({
   }
   if (body.length > REVIEW_BODY_LIMIT) {
     body = `${body.slice(0, REVIEW_BODY_LIMIT)}\n\n…(truncated)`;
+  }
+  if (reductions.length > 0) {
+    body += `\n\n> ℹ️ この PR は大きいため、レビューに渡す情報を縮めました: ${reductions.join('、')}`;
   }
   return `${body}\n\n<!-- pavo:meta ${JSON.stringify(meta)} -->`;
 }
@@ -357,7 +365,8 @@ function main(): void {
     ref: process.env.PAVO_REF ?? '',
     run: process.env.RUN_URL ?? '',
   };
-  const body = buildReviewBody({ summary: output.summary, demoted, meta });
+  const reductions = JSON.parse(process.env.PROMPT_REDUCTIONS || '[]') as string[];
+  const body = buildReviewBody({ summary: output.summary, demoted, reductions, meta });
 
   const payload = {
     commit_id: headSha,
@@ -386,7 +395,12 @@ function main(): void {
     review = postReview(repo, prNumber, {
       commit_id: headSha,
       event,
-      body: buildReviewBody({ summary: output.summary, demoted: [...salvaged, ...demoted], meta }),
+      body: buildReviewBody({
+        summary: output.summary,
+        demoted: [...salvaged, ...demoted],
+        reductions,
+        meta,
+      }),
       comments: [],
     });
     postedInline = 0;

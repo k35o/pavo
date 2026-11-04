@@ -109,6 +109,12 @@ Client ID / Private key は `actions/create-github-app-token` にだけ渡り、
 - 解消が確認できた自分の過去指摘スレッドは自動で resolve される。ただし**そのスレッドのファイルが実際に変更された（またはスレッドが outdated になった）場合のみ** — コードが変わっていないのに「解消済み」と主張しても resolve されない
 - デフォルトブランチの `CLAUDE.md` / `AGENTS.md` がプロンプトに注入され、プロジェクト規約としてレビュー基準に反映される（PR が規約ファイルを書き換えても、その PR 自身のレビュー基準は変わらない）
 - 出力言語は PR タイトル・description の主要言語に追従（`language: ja|en` で固定可）
+- プロンプトは claude-code-action に環境変数で渡るため、Linux の 1 変数あたりの上限（128KiB）より小さい予算に収める。大きな PR では次の順に縮め、縮めた内容をレビュー本文の末尾に書く。変更ファイルの全件の一覧はファイルで渡すので、Claude は省いた分も `Read` / `Grep` で読める
+  1. 削除されたファイルと内容の変わらない rename を件数だけにまとめる
+  2. 解決済みスレッドとコメント履歴を省く（未解決の自分の指摘は残す）
+  3. 変更ファイルの一覧を先頭 100 件に絞る
+  4. 既存の会話を省く
+- それでも収まらない PR はレビューせず、その旨のコメントを 1 件だけ残して run を成功で終える（push のたびに同じコメントを更新する）
 
 ## 対象リポジトリ側の設定ファイル
 
@@ -179,8 +185,8 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 1. `gate.ts` — イベント判定（draft / label / bot / association / kill switch）と設定解決（`.github/pavo.json` > inputs > デフォルト）。全ロジックはユニットテスト済み
 2. プリフライト — bot user の存在・App のインストール・PR 読み取り権限を Claude 実行前に検証（失敗は具体的なエラーで即 fail）
 3. PR head を checkout
-4. `collect-context.ts` — GraphQL で全スレッド（resolve 状態・人間の返信込み）・レビュー履歴・コメントを収集し、前回レビュー SHA をマーカーから復元、compare API で差分ファイルを特定
-5. `build-review-prompt.ts` — system + formatting + 観点 + repo 設定 + learnings + 会話コンテキスト + 出力要件を結合
+4. `collect-context.ts` — GraphQL で全スレッド（resolve 状態・人間の返信込み）・レビュー履歴・コメントを収集し、前回レビュー SHA をマーカーから復元、compare API で差分ファイルを特定。ファイル別 diff と変更ファイルの全件の一覧を runner の一時ディレクトリに書く
+5. `build-review-prompt.ts` — system + formatting + 観点 + repo 設定 + learnings + 会話コンテキスト + 出力要件を結合し、予算を超えれば変更ファイルの一覧と会話を段階的に縮める。縮めても収まらなければ `post-oversize-notice.ts` が PR にコメントを残し、以降の Claude 実行と投稿を飛ばす
 6. `claude-code-action` — 読み取り専用ツールで diff とコードを調査し、`--json-schema` で検証された構造化 JSON（summary / verdict / comments / resolved_comment_ids）を返す
 7. （`pavo:deep` のみ）`build-verify-prompt.ts` + 2 回目の `claude-code-action` — 独立セッションが 🔴 / 🟡 の各指摘への反証を試み、verdict（confirmed / refuted / uncertain）を返す
 8. `post-review.ts` — confidence・ignore・min_severity・アンカー検証・検証 verdict・suggestion 検証でフィルタし、Review を 1 回だけ POST（422 時は本文へ退避して再送）。成功後に古い APPROVE を dismiss、ファイルが実際に変更されたスレッドのみ resolve、`$GITHUB_STEP_SUMMARY` にメトリクスを出力
@@ -209,4 +215,5 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 | `--json-schema was provided but Claude did not return structured_output` | Claude 実行自体の失敗。直後の失敗診断ステップの `::error::` / step summary に result の実エラー本文が出る。cost $0 かつ 1 turn なら `CLAUDE_CODE_OAUTH_TOKEN` の失効・無効を疑う |
 | `Unknown instruction: xxx` | `instructions` の typo。既知の観点名はエラーメッセージに列挙される |
 | learnings が保存されない | App の `Contents` 権限が Read のみ。`Read & write` に変更する |
+| 「レビューに渡す情報が大きすぎるため、Pavo はレビューしませんでした」とコメントが付く | 変更ファイルの一覧と会話を縮めても、プロンプトが予算に収まらなかった。PR を分けるか description を短くする。Actions ログの `::warning::` に縮めた内容が出る |
 | 全リポジトリで一斉に止めたい | Actions variable `PAVO_DISABLED=true` |

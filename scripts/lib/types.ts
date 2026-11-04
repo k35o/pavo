@@ -85,6 +85,8 @@ export interface ReviewContext {
   sameAsLastReview: boolean;
   changedSinceLastReview: CompareInfo | null;
   diffDir: string;
+  /** Every changed file, one per line, for when the prompt lists only some. */
+  changedFilesPath: string;
   changedFiles: ChangedFileEntry[];
   linkedIssues?: LinkedIssue[];
   commitMessages?: string[];

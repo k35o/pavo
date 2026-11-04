@@ -9,7 +9,9 @@
 //
 // Also writes each changed file's patch under OUT_DIR/diff/ so Claude can read
 // per-file diffs with the Read tool (`gh pr diff` has no per-file mode and its
-// full output can exceed the Bash tool's output limit on large PRs).
+// full output can exceed the Bash tool's output limit on large PRs), and the
+// whole changed-file list to OUT_DIR/changed-files.txt for when the prompt
+// cannot afford to list every file.
 //
 // Required env: GH_TOKEN (for gh), REPO, PR_NUMBER, BOT_NAME, HEAD_SHA, OUT_DIR
 
@@ -283,6 +285,13 @@ function main(): void {
       hasPatch: file.patch ? writePatchFile(diffDir, file.filename, file.patch) : false,
     });
   }
+  const changedFilesPath = path.join(outDir, 'changed-files.txt');
+  fs.writeFileSync(
+    changedFilesPath,
+    changedFiles
+      .map((file) => `${file.status}\t+${file.additions}/-${file.deletions}\t${file.filename}\n`)
+      .join(''),
+  );
 
   const context: ReviewContext = {
     botName,
@@ -294,6 +303,7 @@ function main(): void {
     sameAsLastReview,
     changedSinceLastReview,
     diffDir,
+    changedFilesPath,
     changedFiles,
     linkedIssues,
     commitMessages,
