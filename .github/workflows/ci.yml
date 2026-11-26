@@ -31,3 +31,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          advanced-security: false
