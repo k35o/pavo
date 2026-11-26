@@ -46,7 +46,7 @@ caller の repo で Actions の Require lockfile ポリシーを有効にして�
 
 | 項目 | 設定 |
 | --- | --- |
-| Repository permissions | `Pull requests: Read & write`, `Contents: Read`（learnings 保存を使うなら `Read & write`）, `Issues: Read & write`, `Metadata: Read` |
+| Repository permissions | `Pull requests: Read & write`, `Contents: Read & write`（スレッド返信からの learnings 保存に使う）, `Issues: Read`, `Metadata: Read` |
 | Webhook | 「Active」のチェックを外す（不要）。イベントの受け取りは caller workflow の `on:` が担うため、App の event subscription は使わない |
 
 ### 2. caller repo（または org）に secret を登録
@@ -57,7 +57,7 @@ caller の repo で Actions の Require lockfile ポリシーを有効にして�
 | `K35O_BOT_CLIENT_ID` | GitHub App の Client ID (`Iv23...`) |
 | `K35O_BOT_PRIVATE_KEY` | GitHub App の Private key (PEM 全体) |
 
-Client ID / Private key は `actions/create-github-app-token` にだけ渡り、Pavo のスクリプトはそれが発行したインストールトークンと App slug だけを受け取る。
+Client ID / Private key は `actions/create-github-app-token` にだけ渡り、Pavo のスクリプトはそれが発行したインストールトークンと App slug だけを受け取る。トークンは App に付けた権限のうち `Pull requests: write`・`Issues: read`・`Contents: read` に絞って発行し、`Contents: write` はスレッド返信のイベントでだけ要求する。同じ App で Renovate などを動かしていて App 自体の権限が広くても、Pavo の実行にはこの範囲しか渡らない。
 
 ## トリガー
 
@@ -217,6 +217,6 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 | レビューが来ない（run が赤） | PR に失敗通知コメントが付く。run URL のログを確認 |
 | `--json-schema was provided but Claude did not return structured_output` | Claude 実行自体の失敗。直後の失敗診断ステップの `::error::` / step summary に result の実エラー本文が出る。cost $0 かつ 1 turn なら `CLAUDE_CODE_OAUTH_TOKEN` の失効・無効を疑う |
 | `Unknown instruction: xxx` | `instructions` の typo。既知の観点名はエラーメッセージに列挙される |
-| learnings が保存されない | App の `Contents` 権限が Read のみ。`Read & write` に変更する |
+| スレッドに返信しても Pavo が応答しない（app-token ステップが `permissions requested are not granted` で失敗） | App の `Contents` 権限が Read のみ。返信のイベントでは `Contents: write` のトークンを要求するので、`Read & write` に変更する |
 | 「レビューに渡す情報が大きすぎるため、Pavo はレビューしませんでした」とコメントが付く | 変更ファイルの一覧と会話を縮めても、プロンプトが予算に収まらなかった。PR を分けるか description を短くする。Actions ログの `::warning::` に縮めた内容が出る |
 | 全リポジトリで一斉に止めたい | Actions variable `PAVO_DISABLED=true` |
