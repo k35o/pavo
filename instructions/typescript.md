@@ -37,9 +37,16 @@
   - 1 箇所でしか現れない型パラメータはないか（具体型やユニオンで十分でないか）
   - 同じ構造の型を複数コピペしておりジェネリクスで統一すべき箇所はないか
   - `extends` 制約が緩すぎて実装内に `as` が必要になっていないか。逆に狭すぎて呼び出し側を不要に縛っていないか
-- **enum vs union**
+- **enum vs union と型だけで消える構文**
   - 新規の `enum` はリテラルユニオン（+ 必要なら `as const` オブジェクト）で代替できないか（特に数値 enum は避ける）
   - `const enum` を使っていないか（isolatedModules 前提のビルドと相性が悪い）
+  - tsconfig に `erasableSyntaxOnly` があるプロジェクト（Node の type stripping で `.ts` を直接動かすもの）で、型を消すだけでは JS にならない構文（`enum`、`namespace`、コンストラクタの parameter properties）を足していないか
+  - `verbatimModuleSyntax` が有効なら、型だけの import / export に `import type` / `export type` を使っているか
+- **tsconfig と TypeScript のバージョン**
+  - TypeScript 6 で非推奨になり 7 で削除されたオプション（`baseUrl`、`moduleResolution: "node"`（node10）や `"classic"`、`target: "es5"`、`outFile`、`module` の `amd` / `umd` / `system`）を新たに使っていないか
+  - `paths` を `baseUrl` なしで解決できる相対パスで書いているか、Node の subpath imports（`package.json` の `imports` と `#` 始まりの指定子）で置き換えられないか
+- **リソースの後始末**
+  - ファイルハンドル、ロック、一時ディレクトリなど、確実に閉じたいリソースを `try` / `finally` で手書きしている箇所は `using` / `await using`（`Symbol.dispose` / `Symbol.asyncDispose`）で書けないか。実行環境（Node 24 以降、対応ブラウザ）が `using` を扱えるか合わせて確認する
 - **utility type**
   - 既存の型から導出できるものを手書きで複製していないか（`Pick` / `Omit` / `Partial` / `Parameters` / `ReturnType` 等）
   - 型の source of truth が 1 箇所に保たれているか（スキーマや定数からの `typeof` 導出を含む）
