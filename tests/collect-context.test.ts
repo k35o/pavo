@@ -110,3 +110,36 @@ test('summarizeThreads: byPavo / isBot がサフィックスなし login でも�
   assert.equal(shaped[1]!.line, 9);
   assert.equal(shaped[1]!.comments.length, 1);
 });
+
+const threadWithRoot = (login: string, body: string) => ({
+  isResolved: false,
+  isOutdated: false,
+  path: 'src/a.ts',
+  line: 3,
+  originalLine: 3,
+  comments: { totalCount: 1, nodes: [{ databaseId: 301, author: { login }, body }] },
+});
+
+test('summarizeThreads: Pavo のスレッドは root コメントのマーカーから severity を読み、本文からは消す', () => {
+  const { threads } = summarizeThreads(
+    [threadWithRoot('k35o-bot', '🟡 例外が握りつぶされます\n\n<!-- pavo:finding {"severity":"warning","confidence":90} -->')],
+    BOT_NAME,
+  );
+  assert.equal(threads[0]!.severity, 'warning');
+  assert.equal(threads[0]!.comments[0]!.body, '🟡 例外が握りつぶされます');
+});
+
+test('summarizeThreads: マーカーのないスレッド、廃止した praise、他人のスレッドは severity を持たない', () => {
+  const { threads } = summarizeThreads(
+    [
+      threadWithRoot('k35o-bot', '🔴 マーカー導入前の指摘'),
+      threadWithRoot('k35o-bot', '👍 <!-- pavo:finding {"severity":"praise","confidence":90} -->'),
+      threadWithRoot('k8o', '<!-- pavo:finding {"severity":"critical","confidence":95} -->'),
+    ],
+    BOT_NAME,
+  );
+  assert.deepEqual(
+    threads.map((thread) => thread.severity),
+    [null, null, null],
+  );
+});

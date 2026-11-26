@@ -26,7 +26,14 @@ import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts'
 import { resolveThreadsByRootIds } from './lib/threads.ts';
 import { applyVerifyVerdicts, type VerifyVerdict } from './lib/verify.ts';
 import { requireEnv } from './lib/env.ts';
-import type { Language, ReviewConfig, ReviewContext, ReviewFinding, Severity } from './lib/types.ts';
+import type {
+  Language,
+  ReviewConfig,
+  ReviewContext,
+  ReviewFinding,
+  Severity,
+  ThreadSummary,
+} from './lib/types.ts';
 
 const CONFIDENCE_THRESHOLD = 80;
 const REVIEW_BODY_LIMIT = 60000;
@@ -170,6 +177,24 @@ export function decideEvent(
 }
 
 /**
+ * Pavo's own 🔴/🟡 threads that stay open after this run. A finding raised
+ * in an earlier review keeps blocking APPROVE until the thread is resolved,
+ * even when this run's reviewer did not repeat it.
+ *
+ * @param resolving root ids this run is about to resolve
+ */
+export function countOpenBlockingThreads(threads: ThreadSummary[], resolving: number[]): number {
+  return threads.filter(
+    (thread) =>
+      thread.byPavo &&
+      !thread.isResolved &&
+      thread.severity !== null &&
+      BLOCKING.has(thread.severity) &&
+      !(thread.rootId !== null && resolving.includes(thread.rootId)),
+  ).length;
+}
+
+/**
  * @param inline findings posted as inline comments, counted in the leading
  *   tally line
  * @param reductions what build-review-prompt.ts left out of the prompt to fit
@@ -182,6 +207,7 @@ export function buildReviewBody({
   inline,
   demoted,
   reductions = [],
+  heldByThreads = 0,
   language,
   meta,
 }: {
@@ -189,6 +215,7 @@ export function buildReviewBody({
   inline: ReviewFinding[];
   demoted: { comment: ReviewFinding; reason: string }[];
   reductions?: string[];
+  heldByThreads?: number;
   language: Language;
   meta: Record<string, string>;
 }): string {
@@ -209,6 +236,9 @@ export function buildReviewBody({
     .join(' · ');
 
   let body = posted.length > 0 ? `${tally}\n\n${summary.trim()}` : summary.trim();
+  if (heldByThreads > 0) {
+    body += `\n\n${text.heldByThreads(heldByThreads)}`;
+  }
   if (unanchored.length > 0) {
     body += `\n\n${text.unanchoredHeading(unanchored.length)}\n\n${unanchored.map(item).join('\n')}`;
   }
@@ -374,12 +404,19 @@ function main(): void {
   if (selfAuthored) {
     notice(`PR opened by ${botName} itself — APPROVE is unavailable, posting a COMMENT review.`);
   }
-  const event = decideEvent(output.verdict, inline, demoted, config, selfAuthored);
   const contextFile = process.env.CONTEXT_FILE;
   const context =
     contextFile && fs.existsSync(contextFile)
       ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
       : null;
+  const { allowed, skipped } = filterResolvableRootIds(
+    (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
+    context,
+  );
+  const openThreads = countOpenBlockingThreads(context?.threads ?? [], allowed);
+  const decided = decideEvent(output.verdict, inline, demoted, config, selfAuthored);
+  const event = openThreads > 0 ? 'COMMENT' : decided;
+  const heldByThreads = decided === 'APPROVE' ? openThreads : 0;
   const meta = {
     sha: headSha,
     diff: context?.diffFingerprint ?? '',
@@ -394,6 +431,7 @@ function main(): void {
     inline,
     demoted,
     reductions,
+    heldByThreads,
     language: config.language,
     meta,
   });
@@ -430,6 +468,7 @@ function main(): void {
         inline: [],
         demoted: [...salvaged, ...demoted],
         reductions,
+        heldByThreads,
         language: config.language,
         meta,
       }),
@@ -440,10 +479,6 @@ function main(): void {
   notice(`Posted review ${review.id} (${event}) with ${postedInline} inline comments.`);
 
   dismissStaleApprovals(repo, prNumber, botName, review.id);
-  const { allowed, skipped } = filterResolvableRootIds(
-    (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
-    context,
-  );
   for (const entry of skipped) {
     notice(`Skipped resolving thread ${entry.rootId}: ${entry.reason}`);
   }

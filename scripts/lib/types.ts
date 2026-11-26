@@ -50,6 +50,7 @@ export interface ThreadSummary {
   isResolved: boolean;
   isOutdated: boolean;
   byPavo: boolean;
+  severity: Severity | null;
   repliesTruncated: boolean;
   comments: ThreadComment[];
 }

@@ -25,13 +25,14 @@ import { fileURLToPath } from 'node:url';
 import { setOutputs, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { ghGraphql, ghJson, ghPaginate, ghPaginatePrConnection } from './lib/gh.ts';
-import { stripFindingMarkers } from './lib/markers.ts';
+import { parseFindingMarker, stripFindingMarkers } from './lib/markers.ts';
 import type {
   ChangedFileEntry,
   CompareInfo,
   LinkedIssue,
   ReviewContext,
   ReviewSummaryEntry,
+  Severity,
   ThreadComment,
   ThreadSummary,
 } from './lib/types.ts';
@@ -48,6 +49,8 @@ const LINKED_ISSUE_BODY_LIMIT = 1500;
 const COMMIT_MESSAGE_LIMIT = 20;
 
 export const META_MARKER_PATTERN = /<!-- pavo:meta (\{.*?\}) -->/gs;
+
+const SEVERITIES: ReadonlySet<Severity> = new Set(['critical', 'warning', 'suggestion']);
 
 const truncate = (body: string | null | undefined, limit: number = BODY_LIMIT): string => {
   const text = body ?? '';
@@ -187,13 +190,16 @@ export function summarizeThreads(
   const shaped: ThreadSummary[] = threads.map((thread) => {
     const comments = thread.comments.nodes;
     const root = comments[0] ?? {};
+    const byPavo = sameLogin(root.author?.login, botName);
+    const severity = byPavo ? parseFindingMarker(root.body)?.severity : undefined;
     return {
       rootId: root.databaseId ?? null,
       path: thread.path,
       line: thread.line ?? thread.originalLine ?? null,
       isResolved: thread.isResolved,
       isOutdated: thread.isOutdated,
-      byPavo: sameLogin(root.author?.login, botName),
+      byPavo,
+      severity: SEVERITIES.has(severity as Severity) ? (severity as Severity) : null,
       repliesTruncated: (thread.comments.totalCount ?? comments.length) > comments.length,
       comments: comments.map((comment: any) => ({
         author: comment.author?.login ?? '?',

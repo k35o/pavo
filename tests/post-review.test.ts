@@ -6,6 +6,7 @@ import { parseFindingMarker, stripFindingMarkers } from '../scripts/lib/markers.
 import { parsePatchLines } from '../scripts/lib/patch.ts';
 import {
   buildReviewBody,
+  countOpenBlockingThreads,
   decideEvent,
   filterResolvableRootIds,
   isNoopSuggestion,
@@ -13,7 +14,7 @@ import {
   renderCommentBody,
   sanitizeSuggestion,
 } from '../scripts/post-review.ts';
-import type { PavoConfig, ReviewFinding } from '../scripts/lib/types.ts';
+import type { PavoConfig, ReviewFinding, ThreadSummary } from '../scripts/lib/types.ts';
 
 const CONFIG: Pick<PavoConfig, 'ignore' | 'minSeverity' | 'approve'> = {
   ignore: ['*.lock'],
@@ -113,6 +114,52 @@ test('decideEvent: 🔴/🟡 があると approve でも COMMENT、approve=false
   );
   assert.equal(decideEvent('comment', [], [], CONFIG, false), 'COMMENT');
   assert.equal(decideEvent('approve', [], [], { ...CONFIG, approve: false }, false), 'COMMENT');
+});
+
+const thread = (overrides: Partial<ThreadSummary> = {}): ThreadSummary => ({
+  rootId: 1,
+  path: 'src/a.ts',
+  line: 2,
+  isResolved: false,
+  isOutdated: false,
+  byPavo: true,
+  severity: 'warning',
+  repliesTruncated: false,
+  comments: [],
+  ...overrides,
+});
+
+test('countOpenBlockingThreads: 未解決の自分の 🔴/🟡 スレッドを数える', () => {
+  const threads = [
+    thread({ rootId: 1, severity: 'critical' }),
+    thread({ rootId: 2, severity: 'warning' }),
+    thread({ rootId: 3, severity: 'suggestion' }),
+    thread({ rootId: 4, isResolved: true }),
+    thread({ rootId: 5, byPavo: false }),
+    thread({ rootId: 6, severity: null }),
+  ];
+  assert.equal(countOpenBlockingThreads(threads, []), 2);
+});
+
+test('countOpenBlockingThreads: この実行で resolve するスレッドは数えない', () => {
+  const threads = [thread({ rootId: 1 }), thread({ rootId: 2 })];
+  assert.equal(countOpenBlockingThreads(threads, [2]), 1);
+  assert.equal(countOpenBlockingThreads(threads, [1, 2]), 0);
+});
+
+test('buildReviewBody: 未解決スレッドで承認を見送ったときは、その理由を本文に書く', () => {
+  const body = buildReviewBody({
+    summary: '問題は見つかりませんでした。',
+    inline: [],
+    demoted: [],
+    heldByThreads: 2,
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(body.includes('🔴 / 🟡 のスレッドが 2 件未解決のため、承認していません。'));
+  assert.ok(
+    !buildReviewBody({ summary: '問題なし', inline: [], demoted: [], language: 'ja', meta: {} }).includes('承認していません'),
+  );
 });
 
 test('decideEvent: 自分が作成した PR は APPROVE できないので COMMENT', () => {
