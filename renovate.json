@@ -10,6 +10,12 @@
       "addLabels": ["upstream-bump"]
     },
     {
+      "description": "actions.lock がコミットを固定するので、workflow の uses はタグ表記のままにする",
+      "matchDepTypes": ["action"],
+      "matchFileNames": [".github/workflows/**"],
+      "pinDigests": false
+    },
+    {
       "description": "pavo.yml の自己参照は @main のまま保つ（理由は pavo.yml のコメント）",
       "matchPackageNames": ["k35o/pavo"],
       "pinDigests": false

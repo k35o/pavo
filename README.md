@@ -36,6 +36,8 @@ jobs:
 
 `@main` のままだと最新を追従する。固定したい場合は `@<commit-sha>` で 40 文字 SHA を指定する（Renovate 等が自動更新できる形）。review.yml は Pavo のスクリプトを自分と同じコミット（`job.workflow_sha`）から取り出すので、この 1 つの pin で実行される Pavo 全体が決まる。
 
+caller の repo で Actions の Require lockfile ポリシーを有効にしている場合、review.yml が使う action は Pavo 側の `actions.lock` で検証される。lockfile を含まない古いコミットに pin していると、run は `startup_failure` で起動しない。
+
 ## セットアップ
 
 ### 1. GitHub App を作成
@@ -168,7 +170,7 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 - `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
 - [`metrics.yml`](.github/workflows/metrics.yml) が週次で指摘スレッドの resolve 率・👍/👎 を集計する。各指摘コメントに埋め込まれた不可視マーカー（severity / confidence）を使って、**severity 別・confidence 帯別の較正テーブル**も出す — confidence 閾値や rubric の調整はこの数字を根拠に行う。任意のリポジトリに対しては `REPO=owner/name BOT_NAME='xxx[bot]' node scripts/report-metrics.ts` で手動実行できる
-- ラップしている `claude-code-action` は SHA pin。Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
+- workflow が使う action は [`actions.lock`](.github/workflows/actions.lock)（`gh actions-lock` が生成する lockfile）でコミットを固定し、`uses:` はタグで書く。ラップしている `claude-code-action` も Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
 
 ## セキュリティ
 
