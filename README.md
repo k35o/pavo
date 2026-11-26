@@ -19,20 +19,27 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review_comment:
     types: [created]
-  issue_comment:
+  issue_comment: # zizmor: ignore[dangerous-triggers]
     types: [created]
+
+permissions: {}
 
 jobs:
   pavo:
     # /pavo コマンド以外の通常コメントで runner を起こさないための事前フィルタ
     if: ${{ github.event_name != 'issue_comment' || startsWith(github.event.comment.body, '/pavo') }}
     uses: k35o/pavo/.github/workflows/review.yml@main
+    permissions:
+      contents: read
     with:
       instructions: default,nextjs
-    secrets: inherit
+    secrets:
+      K35O_BOT_CLIENT_ID: ${{ secrets.K35O_BOT_CLIENT_ID }}
+      K35O_BOT_PRIVATE_KEY: ${{ secrets.K35O_BOT_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-`secrets: inherit` で org secrets（`K35O_BOT_CLIENT_ID` / `K35O_BOT_PRIVATE_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`）がそのまま渡る。concurrency・fork スキップ・timeout・App token 発行は reusable workflow 側に集約されているので、caller の改善は Pavo 側の 1 コミットで全リポジトリに届く。
+Pavo が使う 3 つの secret だけを渡し、caller の他の secret は reusable workflow に届かない。workflow token に要るのは `contents: read` だけで、GitHub への書き込みはすべて App token で行う。`issue_comment` は `/pavo` コマンドのために必要で、review.yml が OWNER / MEMBER / COLLABORATOR 以外のコメントを token の発行前に落とす（zizmor の `dangerous-triggers` を ignore しているのはこのため）。concurrency・fork スキップ・timeout・App token 発行は reusable workflow 側に集約されているので、caller の改善は Pavo 側の 1 コミットで全リポジトリに届く。
 
 `@main` のままだと最新を追従する。固定したい場合は `@<commit-sha>` で 40 文字 SHA を指定する（Renovate 等が自動更新できる形）。review.yml は Pavo のスクリプトを自分と同じコミット（`job.workflow_sha`）から取り出すので、この 1 つの pin で実行される Pavo 全体が決まる。
 
