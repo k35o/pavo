@@ -4,7 +4,7 @@
 // owns everything that must not be left to an LLM: severity emoji, confidence
 // and ignore filtering, anchor validation against the actual diff, the
 // APPROVE/COMMENT decision, the single POST (with a 422 fallback), dismissing
-// stale APPROVEs *after* the new review exists, thread resolution, and metrics.
+// stale APPROVEs *after* the new review exists, and thread resolution.
 //
 // Required env: REPO, PR_NUMBER, HEAD_SHA, BOT_NAME, CONFIG, STRUCTURED_OUTPUT
 // Optional env: RUN_URL, PAVO_REF, CONTEXT_FILE, VERIFY_OUTPUT, PROMPT_REDUCTIONS
@@ -69,7 +69,7 @@ export function isNoopSuggestion(suggestion: string, currentLines: string[]): bo
 
 /**
  * Render one inline comment body: emoji prefix, optional suggestion fence,
- * and the invisible calibration marker consumed by report-metrics.ts.
+ * and the invisible finding marker that later runs read the severity from.
  */
 export function renderCommentBody(comment: {
   severity: Severity;

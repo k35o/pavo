@@ -1,9 +1,3 @@
-// Invisible per-finding calibration marker embedded in each inline comment.
-//
-// post-review.ts writes it, report-metrics.ts reads it back to correlate
-// resolve / reaction rates with severity and confidence — the two knobs that
-// decide what gets posted but are otherwise discarded after the gate.
-
 export const FINDING_MARKER_PATTERN = /<!-- pavo:finding (\{.*?\}) -->/gs;
 
 export function renderFindingMarker(severity: string, confidence: number): string {
