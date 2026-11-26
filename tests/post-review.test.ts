@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractLastReviewedSha } from '../scripts/collect-context.ts';
+import { extractLastReviewMeta } from '../scripts/collect-context.ts';
 import { parseFindingMarker, stripFindingMarkers } from '../scripts/lib/markers.ts';
 import { parsePatchLines } from '../scripts/lib/patch.ts';
 import {
@@ -322,15 +322,16 @@ test('finding マーカーは parseFindingMarker で roundtrip し、strip で�
   assert.ok(!stripFindingMarkers(body).includes('pavo:finding'));
 });
 
-test('meta マーカーは extractLastReviewedSha で roundtrip する', () => {
+test('meta マーカーは extractLastReviewMeta で roundtrip する', () => {
   const sha = 'f'.repeat(40);
+  const diff = 'a'.repeat(64);
   const body = buildReviewBody({
     summary: 'サマリ',
     inline: [],
     demoted: [],
     language: 'ja',
-    meta: { sha, instructions: 'default', model: 'sonnet' },
+    meta: { sha, diff, instructions: 'default', model: 'sonnet' },
   });
   const reviews = [{ author: { login: 'k35o-bot' }, body }];
-  assert.equal(extractLastReviewedSha(reviews, 'k35o-bot[bot]'), sha);
+  assert.deepEqual(extractLastReviewMeta(reviews, 'k35o-bot[bot]'), { sha, diff });
 });

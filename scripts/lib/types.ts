@@ -99,4 +99,5 @@ export interface ReviewContext {
   changedFiles: ChangedFileEntry[];
   linkedIssues?: LinkedIssue[];
   commitMessages?: string[];
+  diffFingerprint?: string;
 }

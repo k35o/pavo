@@ -375,8 +375,14 @@ function main(): void {
     notice(`PR opened by ${botName} itself — APPROVE is unavailable, posting a COMMENT review.`);
   }
   const event = decideEvent(output.verdict, inline, demoted, config, selfAuthored);
+  const contextFile = process.env.CONTEXT_FILE;
+  const context =
+    contextFile && fs.existsSync(contextFile)
+      ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
+      : null;
   const meta = {
     sha: headSha,
+    diff: context?.diffFingerprint ?? '',
     instructions: config.instructions,
     model: config.model,
     ref: process.env.PAVO_REF ?? '',
@@ -434,11 +440,6 @@ function main(): void {
   notice(`Posted review ${review.id} (${event}) with ${postedInline} inline comments.`);
 
   dismissStaleApprovals(repo, prNumber, botName, review.id);
-  const contextFile = process.env.CONTEXT_FILE;
-  const context =
-    contextFile && fs.existsSync(contextFile)
-      ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
-      : null;
   const { allowed, skipped } = filterResolvableRootIds(
     (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
     context,
