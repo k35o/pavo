@@ -170,7 +170,7 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 - `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
 - [`metrics.yml`](.github/workflows/metrics.yml) が週次で指摘スレッドの resolve 率・👍/👎 を集計する。各指摘コメントに埋め込まれた不可視マーカー（severity / confidence）を使って、**severity 別・confidence 帯別の較正テーブル**も出す — confidence 閾値や rubric の調整はこの数字を根拠に行う。任意のリポジトリに対しては `REPO=owner/name BOT_NAME='xxx[bot]' node scripts/report-metrics.ts` で手動実行できる
-- workflow が使う action は [`actions.lock`](.github/workflows/actions.lock)（`gh actions-lock` が生成する lockfile）でコミットを固定し、`uses:` はタグで書く。ラップしている `claude-code-action` も Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
+- workflow が使う action は [`actions.lock`](.github/workflows/actions.lock)（`gh actions-lock` が生成する lockfile）でコミットを固定し、`uses:` はタグで書く。lockfile と workflow の食い違いは CI の verify action が検出する。ラップしている `claude-code-action` も Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
 
 ## セキュリティ
 
