@@ -1,13 +1,19 @@
 # Node.js 観点
 
-Node.js (>= 20) で動くサーバー・CLI・スクリプトに関わる観点。
+Node.js (>= 22) で動くサーバー・CLI・スクリプトに関わる観点。Node 20 はサポートが終了している。
+先に `engines`、`.node-version` / `mise.toml` などで対象の Node のバージョンを確認し、そのバージョンにない API を前提にした指摘はしない。
 古い慣習（callback スタイル、標準モジュールで代替できる定番パッケージ）は積極的に指摘する。
 
 ## 観点
 
 - **モジュールと import**
-  - ESM / CJS の境界を越える箇所で解釈違いが起きていないか（CJS の `require` で ESM を読む、`default` export の二重ラップ）
+  - ESM / CJS の境界を越える箇所で解釈違いが起きていないか（`default` export の二重ラップ、top-level await を含む ESM を `require` している）
+  - CJS から ESM を読むためだけに dynamic `import()` や変換ツールを足していないか（Node 22.12 以降は `require(esm)` が既定で使える）
   - ESM で `__dirname` / `__filename` を前提にしていないか → `import.meta.dirname` / `import.meta.filename`
+- **TypeScript を直接実行するコード**
+  - type stripping（Node 22.18 以降で既定）で `.ts` を直接動かすなら、import 指定子に `.ts` の拡張子を書いているか、型だけの import に `import type` を使っているか
+  - `enum` や `namespace` など、型を消すだけでは動かない構文を使っていないか（`tsconfig` の `erasableSyntaxOnly` で検出できる）
+  - 直接実行できるのにビルド手順や `ts-node` / `tsx` を新たに持ち込んでいないか
 - **async の落とし穴**
   - 投げっぱなしの Promise（`await` も `.catch()` もない呼び出し）が unhandled rejection にならないか
   - 依存関係のない `await` が直列に並んでいないか → `Promise.all` で並行化
@@ -34,8 +40,13 @@ Node.js (>= 20) で動くサーバー・CLI・スクリプトに関わる観点�
   - サーバーのリクエスト処理内で `*Sync` 系 fs API を使っていないか（CLI・起動時の初期化は許容）
   - 外部入力からパスを組み立てる箇所で path traversal を考慮しているか
 - **依存追加の妥当性**
-  - 標準機能で足りるものに依存を追加していないか（`fetch`, `node:test`, `util.parseArgs`, `util.styleText`, `--env-file` 等）
-  - 標準 API で代替できるパッケージ（`mkdirp` → `fs.mkdir` の `recursive`、`rimraf` → `fs.rm`）や、メンテが止まったパッケージ（`request` 等）を新規に持ち込んでいないか
+  - 標準機能で足りるものに依存を追加していないか（`fetch`、`node:test`、`util.parseArgs`、`util.styleText`、`fs.glob`、`--env-file` / `process.loadEnvFile`、`--watch` 等）
+  - 標準 API で代替できるパッケージ（`mkdirp` → `fs.mkdir` の `recursive`、`rimraf` → `fs.rm`、`glob` → `fs.glob`、`dotenv` → `--env-file`、`nodemon` → `--watch`）や、メンテが止まったパッケージ（`request` 等）を新規に持ち込んでいないか
+  - 言語に入った機能を自前で書いていないか（`Promise.withResolvers`、`Array.fromAsync`、`Object.groupBy`、`Set` の集合演算、iterator helpers）
+  - `fetch` のタイムアウトや中断を `AbortSignal.timeout()` / `AbortSignal.any()` で扱っているか（タイムアウトなしの外部呼び出しがないか）
+- **依存のサプライチェーン**
+  - pnpm を使うプロジェクトで、サプライチェーン対策の設定（公開直後のバージョンを避ける `minimumReleaseAge`、公開元の信頼度が下がった版を拒む `trustPolicy`、git や tarball 由来の推移的依存を拒む `blockExoticSubdeps`、install 時スクリプトの許可リスト `allowBuilds`（古い版では `onlyBuiltDependencies`））を緩める変更が紛れ込んでいないか
+  - 新しく install 時スクリプトを実行する依存を許可リストに足すとき、そのパッケージが本当にビルドを必要とするか
 - **npm scripts とエントリポイント**
   - `package.json` の `exports` / `bin` / `main` がビルド成果物の実体と一致しているか
   - scripts がクロスプラットフォームで動くか（シェル固有の記法、環境変数の渡し方）
