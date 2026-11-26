@@ -341,7 +341,7 @@ export function buildReviewPrompt({
     '## 出力要件\n\n' +
       'レビュー結果は GitHub に自分で投稿してはいけません（`gh api` での投稿は許可されていません）。\n' +
       '代わりに、最終出力として次の構造化 JSON を返してください。投稿・整形・APPROVE 判定は Pavo 側が行います。\n\n' +
-      '- `summary`: PR 全体のレビューサマリ。指摘 0 件でも「確認した観点と問題なしの根拠」を必ず書く\n' +
+      '- `summary`: PR 全体のレビューサマリ。構成はプロンプト冒頭の「summary の構成」に従う（1 行目に結論、確認した範囲は `<details>` の中）\n' +
       '- `verdict`: 全体として問題がなく承認してよいなら `approve`、それ以外は `comment`。' +
       '🔴 / 🟡 相当の指摘が 1 件でもあるなら必ず `comment`（🔵 だけなら `approve` でよい）\n' +
       '- `comments[]`: 行単位の指摘。各要素:\n' +

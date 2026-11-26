@@ -98,6 +98,7 @@ Client ID / Private key は `actions/create-github-app-token` にだけ渡り、
 ## レビューの動作
 
 - 重要度は絵文字で表現: 🔴 Critical / 🟡 Warning / 🔵 Suggestion。良い実装を褒めるだけの指摘は出さない
+- レビュー本文は、投稿した指摘の件数（`🔴 1 · 🟡 0 · 🔵 2`、0 件なら省略）、マージしてよいか・何を直すかの結論、折りたたんだ「確認した範囲」の順に並ぶ。件数の行は Pavo のスクリプトが実際に投稿した指摘から数える
 - 各指摘には confidence (0-100) が自己採点され、**80 未満は投稿されない**。confidence は検証の到達度（反証を試みたか）に紐づけて採点される
 - PR にリンクされた issue（closing references）とコミットメッセージがプロンプトに注入され、「issue の要件を満たしているか」「宣言されていない変更が紛れていないか」の判断材料になる
 - 🔴 / 🟡 が 0 件なら `APPROVE`（🔵 の指摘は APPROVE と同時に inline 投稿される）。`approve: false` で常に `COMMENT` にできる — **branch protection の承認数に Pavo を数えたくない場合はこれを使う**

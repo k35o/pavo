@@ -170,34 +170,45 @@ export function decideEvent(
 }
 
 /**
+ * @param inline findings posted as inline comments, counted in the leading
+ *   tally line
  * @param reductions what build-review-prompt.ts left out of the prompt to fit
  *   claude-code-action's env limit
- * @returns final review body with demoted notes, the reductions and the meta
- *   marker
+ * @returns final review body with the tally, demoted notes, the reductions
+ *   and the meta marker
  */
 export function buildReviewBody({
   summary,
+  inline,
   demoted,
   reductions = [],
   language,
   meta,
 }: {
   summary: string;
+  inline: ReviewFinding[];
   demoted: { comment: ReviewFinding; reason: string }[];
   reductions?: string[];
   language: Language;
   meta: Record<string, string>;
 }): string {
   const text = MESSAGES[language];
-  const item = ({ comment, reason }: { comment: ReviewFinding; reason: string }): string =>
-    `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}` +
-    (UNANCHORED_REASONS.has(reason) ? '' : ` _(${reason})_`);
+  const item = ({ comment }: { comment: ReviewFinding }): string =>
+    `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}`;
   const unanchored = demoted.filter(
     ({ comment, reason }) => BLOCKING.has(comment.severity) && UNANCHORED_REASONS.has(reason),
   );
   const notes = demoted.filter((entry) => !unanchored.includes(entry));
 
-  let body = summary.trim();
+  const posted = [
+    ...inline,
+    ...demoted.filter(({ reason }) => UNANCHORED_REASONS.has(reason)).map(({ comment }) => comment),
+  ];
+  const tally = (['critical', 'warning', 'suggestion'] as const)
+    .map((severity) => `${SEVERITY_EMOJI[severity]} ${posted.filter((c) => c.severity === severity).length}`)
+    .join(' · ');
+
+  let body = posted.length > 0 ? `${tally}\n\n${summary.trim()}` : summary.trim();
   if (unanchored.length > 0) {
     body += `\n\n${text.unanchoredHeading(unanchored.length)}\n\n${unanchored.map(item).join('\n')}`;
   }
@@ -374,6 +385,7 @@ function main(): void {
   const reductions = JSON.parse(process.env.PROMPT_REDUCTIONS || '[]') as string[];
   const body = buildReviewBody({
     summary: output.summary,
+    inline,
     demoted,
     reductions,
     language: config.language,
@@ -409,6 +421,7 @@ function main(): void {
       event,
       body: buildReviewBody({
         summary: output.summary,
+        inline: [],
         demoted: [...salvaged, ...demoted],
         reductions,
         language: config.language,

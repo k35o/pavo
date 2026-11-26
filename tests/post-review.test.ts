@@ -185,19 +185,47 @@ test('renderCommentBody: 絵文字付与と suggestion フェンス', () => {
 
 test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   const body = buildReviewBody({
-    summary: 'TL;DR: 問題なし',
+    summary: '問題は見つかりませんでした。',
+    inline: [],
     demoted: [{ comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' }],
     language: 'ja',
     meta: { sha: 'abc', instructions: 'default', model: 'sonnet' },
   });
   assert.ok(body.includes('<details>'));
   assert.ok(body.includes('その他の観察 (1)'));
+  assert.ok(body.includes('- 🔵 `src/a.ts:2` — x が漏れています\n'));
   assert.match(body, /<!-- pavo:meta \{"sha":"abc"/);
+});
+
+test('buildReviewBody: 投稿した指摘の件数を summary の前に 1 行で付ける', () => {
+  const body = buildReviewBody({
+    summary: '`parseDate` が UTC を考慮していません。直してからマージしてください。',
+    inline: [comment({ severity: 'critical' }), comment({ severity: 'suggestion' }), comment({ severity: 'suggestion' })],
+    demoted: [
+      { comment: comment({ severity: 'warning' }), reason: 'line not in diff hunks' },
+      { comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' },
+    ],
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(body.startsWith('🔴 1 · 🟡 1 · 🔵 2\n\n`parseDate` が UTC を考慮していません。'));
+});
+
+test('buildReviewBody: 投稿した指摘が 0 件なら件数の行を付けない', () => {
+  const body = buildReviewBody({
+    summary: '問題は見つかりませんでした。',
+    inline: [],
+    demoted: [{ comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' }],
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(body.startsWith('問題は見つかりませんでした。'));
 });
 
 test('buildReviewBody: 行に付けられなかった 🔴/🟡 は畳まずに本文に出す', () => {
   const body = buildReviewBody({
     summary: '指摘 2 件',
+    inline: [],
     demoted: [
       { comment: comment({ severity: 'critical', line: 40, body: 'SQL を連結しています' }), reason: 'line not in diff hunks' },
       { comment: comment({ severity: 'warning', path: 'src/b.ts', body: '例外が握りつぶされます' }), reason: 'inline post failed' },
@@ -217,6 +245,7 @@ test('buildReviewBody: 行に付けられなかった 🔴/🟡 は畳まずに�
 test('buildReviewBody: 反証された 🔴/🟡 や min_severity 未満の 🟡 は畳む', () => {
   const body = buildReviewBody({
     summary: '指摘なし',
+    inline: [],
     demoted: [
       { comment: comment({ severity: 'critical', body: '誤検知' }), reason: 'refuted by verifier' },
       { comment: comment({ severity: 'warning', body: '設定で抑止' }), reason: 'below min_severity' },
@@ -226,11 +255,14 @@ test('buildReviewBody: 反証された 🔴/🟡 や min_severity 未満の 🟡
   });
   assert.ok(!body.includes('行に付けられなかった指摘'));
   assert.ok(body.includes('その他の観察 (2)'));
+  assert.ok(!body.includes('refuted by verifier'));
+  assert.ok(!body.includes('below min_severity'));
 });
 
 test('buildReviewBody: en の見出しも英語で書く', () => {
   const body = buildReviewBody({
     summary: 'One finding.',
+    inline: [],
     demoted: [{ comment: comment({ severity: 'warning', line: 40, body: 'Swallows the error' }), reason: 'line not in diff hunks' }],
     language: 'en',
     meta: {},
@@ -241,6 +273,7 @@ test('buildReviewBody: en の見出しも英語で書く', () => {
 test('buildReviewBody: en では定型文も英語で書く', () => {
   const body = buildReviewBody({
     summary: 'One finding.',
+    inline: [],
     demoted: [{ comment: comment({ severity: 'suggestion', body: 'Could share a helper' }), reason: 'below min_severity' }],
     reductions: ['left out the existing conversation'],
     language: 'en',
@@ -253,7 +286,8 @@ test('buildReviewBody: en では定型文も英語で書く', () => {
 
 test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を本文に書く', () => {
   const body = buildReviewBody({
-    summary: 'TL;DR: 問題なし',
+    summary: '問題は見つかりませんでした。',
+    inline: [],
     demoted: [],
     reductions: ['削除されたファイルと内容の変わらない rename を件数だけにまとめた', '解決済みスレッドとコメント履歴を省いた'],
     language: 'ja',
@@ -265,12 +299,13 @@ test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を
         '削除されたファイルと内容の変わらない rename を件数だけにまとめた、解決済みスレッドとコメント履歴を省いた',
     ),
   );
-  assert.ok(!buildReviewBody({ summary: 'TL;DR', demoted: [], language: 'ja', meta: {} }).includes('ℹ️'));
+  assert.ok(!buildReviewBody({ summary: '問題なし', inline: [], demoted: [], language: 'ja', meta: {} }).includes('ℹ️'));
 });
 
 test('buildReviewBody: サマリが長くて切り詰めても、縮めた旨は残る', () => {
   const body = buildReviewBody({
     summary: 'あ'.repeat(70000),
+    inline: [],
     demoted: [],
     reductions: ['既存の会話を省いた'],
     language: 'ja',
@@ -291,6 +326,7 @@ test('meta マーカーは extractLastReviewedSha で roundtrip する', () => {
   const sha = 'f'.repeat(40);
   const body = buildReviewBody({
     summary: 'サマリ',
+    inline: [],
     demoted: [],
     language: 'ja',
     meta: { sha, instructions: 'default', model: 'sonnet' },
