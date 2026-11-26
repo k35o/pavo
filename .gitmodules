@@ -1,0 +1,3 @@
+[submodule "vendor/claude-plugins"]
+	path = vendor/claude-plugins
+	url = https://github.com/k35o/claude-plugins.git

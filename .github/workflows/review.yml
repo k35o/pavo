@@ -111,6 +111,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .pavo
           persist-credentials: false
+          submodules: true
 
       # The PR checkout below empties the workspace.
       - run: mv .pavo "${RUNNER_TEMP}/pavo-src"

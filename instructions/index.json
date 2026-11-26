@@ -1,10 +1,11 @@
 {
-  "default": [],
-  "frontend": [],
-  "react": ["frontend"],
-  "nextjs": ["frontend", "react"],
-  "typescript": [],
-  "node": ["typescript"],
-  "github-actions": [],
-  "walkthrough": []
+  "default": { "skills": ["security"] },
+  "frontend": {},
+  "react": { "deps": ["frontend"], "skills": ["react"] },
+  "nextjs": { "deps": ["frontend", "react"] },
+  "typescript": {},
+  "node": { "deps": ["typescript"] },
+  "github-actions": {},
+  "testing": { "skills": ["testing"] },
+  "walkthrough": {}
 }
