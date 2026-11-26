@@ -6,6 +6,7 @@ workflows:
     '.github/workflows/ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'github/gh-actions-lock@verify/v0.5.1'
+        - 'jdx/mise-action@v5.2.9'
     '.github/workflows/credential-check.yml':
         - 'actions/create-github-app-token@v3.4.0'
         - 'anthropics/claude-code-action@v1.0.283'
@@ -37,6 +38,11 @@ dependencies:
         commit: 'sha1-5fa07d19c267d19e29f4341f10fdf7f516375038'
         owner_id: 9919
         repo_id: 1217640442
+    'jdx/mise-action@v5.2.9':
+        ref: 'v5.2.9'
+        commit: 'sha1-236a21c3b91f5db6d4e174b348674a0f0caac06d'
+        owner_id: 216188
+        repo_id: 738284564
     'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6':
         ref: 'v2.2.0'
         commit: 'sha1-0c5077e51419868618aeaa5fe8019c62421857d6'

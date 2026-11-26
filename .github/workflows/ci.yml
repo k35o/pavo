@@ -25,6 +25,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: github/gh-actions-lock@verify/v0.5.1
+      - uses: jdx/mise-action@v5.2.9
       # typescript is a dev-only dependency; the action itself runs the .ts
       # sources directly via Node's built-in type stripping (no build step).
       - run: npm ci

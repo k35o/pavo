@@ -175,7 +175,7 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 ## バージョン管理と CI
 
 - タグやリリース運用は持たず、ブランチか commit SHA で参照する。Renovate は SHA pin を `# main` の digest として追従する
-- [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する
+- [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する。Node は `mise.toml` で固定したバージョンを mise で入れて使う
 - `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
 - workflow が使う action は [`actions.lock`](.github/workflows/actions.lock)（`gh actions-lock` が生成する lockfile）でコミットを固定し、`uses:` はタグで書く。lockfile と workflow の食い違いは CI の verify action が検出する。ラップしている `claude-code-action` も Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
