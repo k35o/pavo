@@ -21,11 +21,12 @@ import { repairLiteralEscapes } from './lib/escapes.ts';
 import { failureDetail, gh, ghJson, ghPaginate } from './lib/gh.ts';
 import { matchesAnyGlob } from './lib/glob.ts';
 import { renderFindingMarker } from './lib/markers.ts';
+import { MESSAGES } from './lib/messages.ts';
 import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts';
 import { resolveThreadsByRootIds } from './lib/threads.ts';
 import { applyVerifyVerdicts, type VerifyVerdict } from './lib/verify.ts';
 import { requireEnv } from './lib/env.ts';
-import type { PavoConfig, ReviewContext, ReviewFinding, Severity } from './lib/types.ts';
+import type { Language, ReviewConfig, ReviewContext, ReviewFinding, Severity } from './lib/types.ts';
 
 const CONFIDENCE_THRESHOLD = 80;
 const REVIEW_BODY_LIMIT = 60000;
@@ -37,6 +38,9 @@ export const SEVERITY_EMOJI: Record<Severity, string> = {
   suggestion: '🔵',
   praise: '👍',
 };
+
+const BLOCKING: ReadonlySet<Severity> = new Set(['critical', 'warning']);
+const UNANCHORED_REASONS = new Set(['file not in diff', 'line not in diff hunks']);
 
 /**
  * Clean a raw suggestion: a suggestion on deleted lines (side LEFT) can never
@@ -163,7 +167,7 @@ export function decideEvent(
   if (selfAuthored) return 'COMMENT';
   if (!config.approve || verdict !== 'approve') return 'COMMENT';
   const blocking = [...inline, ...demoted.map((entry) => entry.comment)].some((comment) =>
-    ['critical', 'warning'].includes(comment.severity),
+    BLOCKING.has(comment.severity),
   );
   return blocking ? 'COMMENT' : 'APPROVE';
 }
@@ -178,31 +182,29 @@ export function buildReviewBody({
   summary,
   demoted,
   reductions = [],
+  language,
   meta,
 }: {
   summary: string;
   demoted: { comment: ReviewFinding; reason: string }[];
   reductions?: string[];
+  language: Language;
   meta: Record<string, string>;
 }): string {
+  const text = MESSAGES[language];
+  const item = ({ comment, reason }: { comment: ReviewFinding; reason: string }): string =>
+    `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}` +
+    (UNANCHORED_REASONS.has(reason) ? '' : ` _(${reason})_`);
+
   let body = summary.trim();
   if (demoted.length > 0) {
-    const items = demoted
-      .map(
-        ({ comment, reason }) =>
-          `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}` +
-          (reason === 'line not in diff hunks' || reason === 'file not in diff'
-            ? ''
-            : ` _(${reason})_`),
-      )
-      .join('\n');
-    body += `\n\n<details>\n<summary>その他の観察 (${demoted.length})</summary>\n\n${items}\n\n</details>`;
+    body += `\n\n<details>\n<summary>${text.otherNotes(demoted.length)}</summary>\n\n${demoted.map(item).join('\n')}\n\n</details>`;
   }
   if (body.length > REVIEW_BODY_LIMIT) {
     body = `${body.slice(0, REVIEW_BODY_LIMIT)}\n\n…(truncated)`;
   }
   if (reductions.length > 0) {
-    body += `\n\n> ℹ️ この PR は大きいため、レビューに渡す情報を縮めました: ${reductions.join('、')}`;
+    body += `\n\n${text.reducedNotice(reductions)}`;
   }
   return `${body}\n\n<!-- pavo:meta ${JSON.stringify(meta)} -->`;
 }
@@ -327,7 +329,7 @@ function main(): void {
   const prNumber = requireEnv('PR_NUMBER');
   const headSha = requireEnv('HEAD_SHA');
   const botName = requireEnv('BOT_NAME');
-  const config = JSON.parse(requireEnv('CONFIG')) as PavoConfig;
+  const config = JSON.parse(requireEnv('CONFIG')) as ReviewConfig;
   const output = repairLiteralEscapes(JSON.parse(requireEnv('STRUCTURED_OUTPUT')));
 
   if (typeof output.summary !== 'string' || !output.summary.trim()) {
@@ -345,7 +347,7 @@ function main(): void {
     try {
       const verify = JSON.parse(process.env.VERIFY_OUTPUT) as { verdicts?: VerifyVerdict[] };
       if (Array.isArray(verify.verdicts)) {
-        const verified = applyVerifyVerdicts(partition, output.comments, verify.verdicts);
+        const verified = applyVerifyVerdicts(partition, output.comments, verify.verdicts, config.language);
         notice(`Verifier: ${verified.refuted} refuted, ${verified.uncertain} uncertain.`);
       }
     } catch (error) {
@@ -366,7 +368,13 @@ function main(): void {
     run: process.env.RUN_URL ?? '',
   };
   const reductions = JSON.parse(process.env.PROMPT_REDUCTIONS || '[]') as string[];
-  const body = buildReviewBody({ summary: output.summary, demoted, reductions, meta });
+  const body = buildReviewBody({
+    summary: output.summary,
+    demoted,
+    reductions,
+    language: config.language,
+    meta,
+  });
 
   const payload = {
     commit_id: headSha,
@@ -399,6 +407,7 @@ function main(): void {
         summary: output.summary,
         demoted: [...salvaged, ...demoted],
         reductions,
+        language: config.language,
         meta,
       }),
       comments: [],

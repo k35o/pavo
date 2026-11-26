@@ -186,6 +186,7 @@ test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   const body = buildReviewBody({
     summary: 'TL;DR: 問題なし',
     demoted: [{ comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' }],
+    language: 'ja',
     meta: { sha: 'abc', instructions: 'default', model: 'sonnet' },
   });
   assert.ok(body.includes('<details>'));
@@ -193,11 +194,25 @@ test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   assert.match(body, /<!-- pavo:meta \{"sha":"abc"/);
 });
 
+test('buildReviewBody: en では定型文も英語で書く', () => {
+  const body = buildReviewBody({
+    summary: 'One finding.',
+    demoted: [{ comment: comment({ severity: 'suggestion', body: 'Could share a helper' }), reason: 'below min_severity' }],
+    reductions: ['left out the existing conversation'],
+    language: 'en',
+    meta: {},
+  });
+  assert.ok(body.includes('<summary>Other notes (1)</summary>'));
+  assert.ok(body.includes('ℹ️ This PR is large, so the review was given less context: left out the existing conversation'));
+  assert.ok(!/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(body));
+});
+
 test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を本文に書く', () => {
   const body = buildReviewBody({
     summary: 'TL;DR: 問題なし',
     demoted: [],
     reductions: ['削除されたファイルと内容の変わらない rename を件数だけにまとめた', '解決済みスレッドとコメント履歴を省いた'],
+    language: 'ja',
     meta: { sha: 'abc' },
   });
   assert.ok(
@@ -206,7 +221,7 @@ test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を
         '削除されたファイルと内容の変わらない rename を件数だけにまとめた、解決済みスレッドとコメント履歴を省いた',
     ),
   );
-  assert.ok(!buildReviewBody({ summary: 'TL;DR', demoted: [], meta: {} }).includes('ℹ️'));
+  assert.ok(!buildReviewBody({ summary: 'TL;DR', demoted: [], language: 'ja', meta: {} }).includes('ℹ️'));
 });
 
 test('buildReviewBody: サマリが長くて切り詰めても、縮めた旨は残る', () => {
@@ -214,6 +229,7 @@ test('buildReviewBody: サマリが長くて切り詰めても、縮めた旨は
     summary: 'あ'.repeat(70000),
     demoted: [],
     reductions: ['既存の会話を省いた'],
+    language: 'ja',
     meta: { sha: 'abc' },
   });
   assert.ok(body.includes('…(truncated)'));
@@ -232,6 +248,7 @@ test('meta マーカーは extractLastReviewedSha で roundtrip する', () => {
   const body = buildReviewBody({
     summary: 'サマリ',
     demoted: [],
+    language: 'ja',
     meta: { sha, instructions: 'default', model: 'sonnet' },
   });
   const reviews = [{ author: { login: 'k35o-bot' }, body }];

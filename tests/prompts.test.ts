@@ -9,12 +9,13 @@ import type { ConversationPromptParams } from '../scripts/build-conversation-pro
 import { buildReviewPrompt } from '../scripts/build-review-prompt.ts';
 import type { BuildReviewPromptParams } from '../scripts/build-review-prompt.ts';
 import { resolveConfig } from '../scripts/lib/config.ts';
-import type { PavoConfig, ReviewContext } from '../scripts/lib/types.ts';
+import type { ReviewConfig, ReviewContext } from '../scripts/lib/types.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
-const baseConfig = (overrides: Partial<PavoConfig> = {}): PavoConfig => ({
+const baseConfig = (overrides: Partial<ReviewConfig> = {}): ReviewConfig => ({
   ...resolveConfig({}, null),
+  language: 'ja',
   ...overrides,
 });
 
@@ -43,6 +44,13 @@ test('レビュープロンプト: 全 instructions 組み合わせで主要セ�
     assert.ok(prompt.includes('レビュー対象外のファイル'), `${instructions}: ignore がない`);
     assert.ok(!prompt.includes('gh api --method POST'), `${instructions}: 旧投稿指示が残っている`);
   }
+});
+
+test('レビュープロンプト: gate が決めた言語だけを指示し、PR から推測させない', () => {
+  const english = buildReview({ config: baseConfig({ language: 'en' }) });
+  assert.ok(english.includes('`summary` と `comments[].body` は英語で書いてください。'));
+  assert.ok(!english.includes('主要言語に合わせて'));
+  assert.ok(buildReview().includes('`summary` と `comments[].body` は日本語で書いてください。'));
 });
 
 test('レビュープロンプト: PR description は untrusted フェンスに包まれ、閉じタグ偽装が無害化される', () => {

@@ -5,7 +5,7 @@
 // Every push reruns the review path, so the notice is a single comment that
 // later runs update in place instead of stacking a new one per push.
 //
-// Required env: GH_TOKEN (for gh), REPO, PR_NUMBER, HEAD_SHA, BOT_NAME
+// Required env: GH_TOKEN (for gh), REPO, PR_NUMBER, HEAD_SHA, BOT_NAME, CONFIG
 // Optional env: RUN_URL
 
 import process from 'node:process';
@@ -15,17 +15,22 @@ import { notice } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { gh, ghPaginate } from './lib/gh.ts';
 import { requireEnv } from './lib/env.ts';
+import { MESSAGES } from './lib/messages.ts';
+import type { Language, ReviewConfig } from './lib/types.ts';
 
 const OVERSIZE_MARKER = '<!-- pavo:oversize -->';
 
-export function buildOversizeNotice({ headSha, runUrl }: { headSha: string; runUrl: string }): string {
-  return (
-    `⚠️ この PR はレビューに渡す情報が大きすぎるため、Pavo はレビューしませんでした（head \`${headSha.slice(0, 7)}\`）。\n\n` +
-    '変更ファイルの一覧と既存の会話を縮めても、claude-code-action に渡せる大きさに収まりませんでした。' +
-    'PR を分けるか description を短くすると、次の push でレビューされます。\n\n' +
-    (runUrl ? `${runUrl}\n\n` : '') +
-    OVERSIZE_MARKER
-  );
+export function buildOversizeNotice({
+  headSha,
+  runUrl,
+  language,
+}: {
+  headSha: string;
+  runUrl: string;
+  language: Language;
+}): string {
+  const run = runUrl ? `${runUrl}\n\n` : '';
+  return `${MESSAGES[language].oversizeNotice(headSha.slice(0, 7))}\n\n${run}${OVERSIZE_MARKER}`;
 }
 
 /**
@@ -46,7 +51,11 @@ function main(): void {
   const repo = requireEnv('REPO');
   const prNumber = requireEnv('PR_NUMBER');
   const input = JSON.stringify({
-    body: buildOversizeNotice({ headSha: requireEnv('HEAD_SHA'), runUrl: process.env.RUN_URL ?? '' }),
+    body: buildOversizeNotice({
+      headSha: requireEnv('HEAD_SHA'),
+      runUrl: process.env.RUN_URL ?? '',
+      language: (JSON.parse(requireEnv('CONFIG')) as ReviewConfig).language,
+    }),
   });
   const existing = findOversizeNotice(
     ghPaginate(`repos/${repo}/issues/${prNumber}/comments`),

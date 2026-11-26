@@ -22,9 +22,16 @@ import { fileURLToPath } from 'node:url';
 
 import { setOutputs, notice } from './lib/actions.ts';
 import { normalizeLogin, sameLogin } from './lib/bot.ts';
-import { parseList, parseRepoConfig, resolveConfig, type RepoConfig } from './lib/config.ts';
+import {
+  parseList,
+  parseRepoConfig,
+  resolveConfig,
+  resolveLanguage,
+  type RepoConfig,
+} from './lib/config.ts';
 import { failureDetail, gh, ghJson } from './lib/gh.ts';
 import { requireEnv } from './lib/env.ts';
+import type { ReviewConfig } from './lib/types.ts';
 
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const COMMAND_PATTERN = /^\/pavo(?:\s+review)?\s*$/;
@@ -289,6 +296,11 @@ function main(): void {
   }
 
   const body = decision.pr.body ?? '';
+  const reviewConfig: ReviewConfig = {
+    ...config,
+    model,
+    language: resolveLanguage(config.language, decision.pr.title, body),
+  };
   setOutputs({
     mode: decision.mode,
     pr_number: String(decision.pr.number),
@@ -299,7 +311,7 @@ function main(): void {
     root_id: decision.mode === 'convo' ? String(decision.convo.rootId) : '',
     model,
     deep: deep ? 'true' : 'false',
-    config: JSON.stringify({ ...config, model }),
+    config: JSON.stringify(reviewConfig),
     ...sideFiles,
   });
 }
