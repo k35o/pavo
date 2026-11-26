@@ -37,14 +37,14 @@ const comment = (overrides: Partial<ReviewFinding> = {}): ReviewFinding => ({
   ...overrides,
 });
 
-test('confidence 80 未満は drop（praise は対象外）', () => {
+test('confidence 80 未満は drop', () => {
   const { inline, dropped } = partitionComments(
-    [comment({ confidence: 79 }), comment({ severity: 'praise', confidence: 0 })],
+    [comment({ confidence: 79 }), comment({ severity: 'suggestion', confidence: 80 })],
     CONFIG,
     FILES,
   );
   assert.equal(inline.length, 1);
-  assert.equal(inline[0]!.severity, 'praise');
+  assert.equal(inline[0]!.severity, 'suggestion');
   assert.equal(dropped.length, 1);
   assert.match(dropped[0]!.reason, /confidence/);
 });
@@ -61,6 +61,7 @@ test('壊れた指摘（path/line/body 欠落・未知 severity）は drop', () 
       comment({ line: Number.NaN }),
       comment({ body: '   ' }),
       comment({ severity: 'blocker' as ReviewFinding['severity'] }),
+      comment({ severity: 'praise' as ReviewFinding['severity'] }),
     ],
     CONFIG,
     FILES,
@@ -69,7 +70,7 @@ test('壊れた指摘（path/line/body 欠落・未知 severity）は drop', () 
   assert.equal(demoted.length, 0);
   assert.deepEqual(
     dropped.map((entry) => entry.reason),
-    ['malformed', 'malformed', 'malformed', 'unknown severity: blocker'],
+    ['malformed', 'malformed', 'malformed', 'unknown severity: blocker', 'unknown severity: praise'],
   );
 });
 
@@ -117,7 +118,7 @@ test('decideEvent: 🔴/🟡 があると approve でも COMMENT、approve=false
 test('decideEvent: 自分が作成した PR は APPROVE できないので COMMENT', () => {
   assert.equal(decideEvent('approve', [], [], CONFIG, true), 'COMMENT');
   assert.equal(
-    decideEvent('approve', [comment({ severity: 'praise' })], [], CONFIG, true),
+    decideEvent('approve', [comment({ severity: 'suggestion' })], [], CONFIG, true),
     'COMMENT',
   );
 });

@@ -36,7 +36,6 @@ export const SEVERITY_EMOJI: Record<Severity, string> = {
   critical: '🔴',
   warning: '🟡',
   suggestion: '🔵',
-  praise: '👍',
 };
 
 const BLOCKING: ReadonlySet<Severity> = new Set(['critical', 'warning']);
@@ -125,14 +124,12 @@ export function partitionComments(
       dropped.push({ comment, reason: 'ignored path' });
       continue;
     }
-    if (comment.severity !== 'praise' && comment.confidence < CONFIDENCE_THRESHOLD) {
+    if (comment.confidence < CONFIDENCE_THRESHOLD) {
       dropped.push({ comment, reason: `confidence ${comment.confidence} < ${CONFIDENCE_THRESHOLD}` });
       continue;
     }
 
-    // Praise is thresholded like a suggestion: quiet configs stay quiet.
-    const rank = comment.severity === 'praise' ? severityRank('suggestion') : severityRank(comment.severity);
-    if (rank < threshold) {
+    if (severityRank(comment.severity) < threshold) {
       demoted.push({ comment, reason: 'below min_severity' });
       continue;
     }
@@ -438,13 +435,13 @@ function main(): void {
   }
   const resolvedCount = resolveThreadsByRootIds(repo, prNumber, botName, allowed);
 
-  const counts = { critical: 0, warning: 0, suggestion: 0, praise: 0 };
+  const counts = { critical: 0, warning: 0, suggestion: 0 };
   for (const comment of inline) counts[comment.severity] += 1;
   addStepSummary(
     `### Pavo review\n\n` +
-      `| event | 🔴 | 🟡 | 🔵 | 👍 | demoted | dropped | resolved |\n` +
-      `| --- | --- | --- | --- | --- | --- | --- | --- |\n` +
-      `| ${event} | ${counts.critical} | ${counts.warning} | ${counts.suggestion} | ${counts.praise} | ${demoted.length} | ${dropped.length} | ${resolvedCount} |\n`,
+      `| event | 🔴 | 🟡 | 🔵 | demoted | dropped | resolved |\n` +
+      `| --- | --- | --- | --- | --- | --- | --- |\n` +
+      `| ${event} | ${counts.critical} | ${counts.warning} | ${counts.suggestion} | ${demoted.length} | ${dropped.length} | ${resolvedCount} |\n`,
   );
   if (skipped.length > 0) {
     addStepSummary(

@@ -343,12 +343,12 @@ export function buildReviewPrompt({
       '代わりに、最終出力として次の構造化 JSON を返してください。投稿・整形・APPROVE 判定は Pavo 側が行います。\n\n' +
       '- `summary`: PR 全体のレビューサマリ。指摘 0 件でも「確認した観点と問題なしの根拠」を必ず書く\n' +
       '- `verdict`: 全体として問題がなく承認してよいなら `approve`、それ以外は `comment`。' +
-      '🔴 / 🟡 相当の指摘が 1 件でもあるなら必ず `comment`（🔵 / 👍 だけなら `approve` でよい）\n' +
+      '🔴 / 🟡 相当の指摘が 1 件でもあるなら必ず `comment`（🔵 だけなら `approve` でよい）\n' +
       '- `comments[]`: 行単位の指摘。各要素:\n' +
       '  - `path` / `line` / `side`: 対象位置。`line` は **diff の hunk に含まれる行のみ**（追加行・文脈行は RIGHT、削除行は LEFT）\n' +
       '  - `start_line` / `start_side`: 複数行にまたがる指摘のときだけ指定（同一 hunk 内で `start_line < line`）\n' +
-      '  - `severity`: `critical` | `warning` | `suggestion` | `praise`（rubric はプロンプト冒頭の「重要度と confidence の判定」参照）\n' +
-      '  - `confidence`: 0-100。80 未満の指摘は投稿されない（praise を除く）\n' +
+      '  - `severity`: `critical` | `warning` | `suggestion`（rubric はプロンプト冒頭の「重要度と confidence の判定」参照）\n' +
+      '  - `confidence`: 0-100。80 未満の指摘は投稿されない\n' +
       '  - `body`: 指摘本文。severity 絵文字は **書かない**（Pavo 側で付与する）\n' +
       '  - `suggestion`: 対象行の置換だけで完結する具体的修正がある場合のみ、置換後のコードをそのまま入れる' +
       '（フェンスで囲まない。行範囲は `start_line`〜`line` と一致させる）\n' +
