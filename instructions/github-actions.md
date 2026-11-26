@@ -1,7 +1,8 @@
 # GitHub Actions 観点
 
 Workflow YAML・composite action・CI 用シェルスクリプトに関わる観点。
-非推奨の `::set-output` / `::set-env` やタグ参照のままのサードパーティ action など、古い慣習は積極的に指摘する。
+非推奨の `::set-output` / `::set-env` や、SHA でも lockfile でも固定されていないタグ参照のサードパーティ action など、古い慣習は積極的に指摘する。
+リポジトリに zizmor の設定や CI があれば、zizmor が機械的に検出できる指摘は繰り返さず、`# zizmor: ignore[...]` で除外した箇所の理由が妥当かを見る。
 
 ## 観点
 
@@ -17,12 +18,16 @@ Workflow YAML・composite action・CI 用シェルスクリプトに関わる観
   - トップレベルは `permissions: {}` か read のみに絞り、書き込みが必要な job だけに個別付与しているか
   - `GITHUB_TOKEN` に用途を超えた `contents: write` / `pull-requests: write` 等が付いていないか
   - PAT や App トークンを、より権限の弱い `GITHUB_TOKEN` で置き換えられないか
+  - `actions/create-github-app-token` に `permission-*` の入力があり、App 自体の権限より狭い token を発行しているか
+  - クラウドへのデプロイで長期の認証情報を secrets に置かず、OIDC（`id-token: write`）で短期の認証情報を受け取れないか
 - **secrets の扱い**
   - secrets がログに出うる経路がないか（`echo`・デバッグ出力・エラーメッセージ・`set -x` 経由）
   - 自動マスクが値の完全一致に依存することを考慮しているか（JSON 等の構造化データを secret として登録した場合や、base64 等で加工した値を出力した場合はマスクされない）
   - fork からの PR で実行されるパスに secrets が流れていないか（`pull_request` では渡らない前提が崩れていないか）
+  - reusable workflow の呼び出しで `secrets: inherit` を使わず、呼び出し先が宣言した secret だけを渡しているか
 - **サプライチェーン**
-  - サードパーティ action を full-length SHA でピンし、バージョンをコメントで併記しているか（タグ・ブランチ参照は後から書き換え可能）
+  - サードパーティ action のコミットが固定されているか。`.github/workflows/actions.lock`（`gh actions-lock` が生成する lockfile）があるリポジトリでは `uses:` はタグで書き、lockfile が同じ PR で更新されているかを見る。lockfile がなければ full-length SHA でピンし、バージョンをコメントで併記しているか
+  - lockfile を手で編集していないか（`gh actions-lock` で生成し直す）。CI で `gh actions-lock` の verify が走っているか
   - キャッシュキーに信頼できない入力が混ざり、汚染されたキャッシュが信頼される job に流入する余地がないか
   - `actions/checkout` は push が不要な job で `persist-credentials: false` にしているか
 - **シェルの堅牢性**
