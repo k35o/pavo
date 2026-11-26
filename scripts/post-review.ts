@@ -40,7 +40,7 @@ export const SEVERITY_EMOJI: Record<Severity, string> = {
 };
 
 const BLOCKING: ReadonlySet<Severity> = new Set(['critical', 'warning']);
-const UNANCHORED_REASONS = new Set(['file not in diff', 'line not in diff hunks']);
+const UNANCHORED_REASONS = new Set(['file not in diff', 'line not in diff hunks', 'inline post failed']);
 
 /**
  * Clean a raw suggestion: a suggestion on deleted lines (side LEFT) can never
@@ -195,10 +195,17 @@ export function buildReviewBody({
   const item = ({ comment, reason }: { comment: ReviewFinding; reason: string }): string =>
     `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}` +
     (UNANCHORED_REASONS.has(reason) ? '' : ` _(${reason})_`);
+  const unanchored = demoted.filter(
+    ({ comment, reason }) => BLOCKING.has(comment.severity) && UNANCHORED_REASONS.has(reason),
+  );
+  const notes = demoted.filter((entry) => !unanchored.includes(entry));
 
   let body = summary.trim();
-  if (demoted.length > 0) {
-    body += `\n\n<details>\n<summary>${text.otherNotes(demoted.length)}</summary>\n\n${demoted.map(item).join('\n')}\n\n</details>`;
+  if (unanchored.length > 0) {
+    body += `\n\n${text.unanchoredHeading(unanchored.length)}\n\n${unanchored.map(item).join('\n')}`;
+  }
+  if (notes.length > 0) {
+    body += `\n\n<details>\n<summary>${text.otherNotes(notes.length)}</summary>\n\n${notes.map(item).join('\n')}\n\n</details>`;
   }
   if (body.length > REVIEW_BODY_LIMIT) {
     body = `${body.slice(0, REVIEW_BODY_LIMIT)}\n\n…(truncated)`;

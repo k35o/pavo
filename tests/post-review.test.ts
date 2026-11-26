@@ -194,6 +194,49 @@ test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   assert.match(body, /<!-- pavo:meta \{"sha":"abc"/);
 });
 
+test('buildReviewBody: 行に付けられなかった 🔴/🟡 は畳まずに本文に出す', () => {
+  const body = buildReviewBody({
+    summary: '指摘 2 件',
+    demoted: [
+      { comment: comment({ severity: 'critical', line: 40, body: 'SQL を連結しています' }), reason: 'line not in diff hunks' },
+      { comment: comment({ severity: 'warning', path: 'src/b.ts', body: '例外が握りつぶされます' }), reason: 'inline post failed' },
+      { comment: comment({ severity: 'suggestion', body: '名前を揃えられます' }), reason: 'line not in diff hunks' },
+    ],
+    language: 'ja',
+    meta: {},
+  });
+  const [visible, folded] = body.split('<details>');
+  assert.ok(visible!.includes('### 行に付けられなかった指摘 (2)'));
+  assert.ok(visible!.includes('- 🔴 `src/a.ts:40` — SQL を連結しています\n'));
+  assert.ok(visible!.includes('- 🟡 `src/b.ts:2` — 例外が握りつぶされます\n'));
+  assert.ok(folded!.includes('その他の観察 (1)'));
+  assert.ok(folded!.includes('- 🔵 `src/a.ts:2` — 名前を揃えられます'));
+});
+
+test('buildReviewBody: 反証された 🔴/🟡 や min_severity 未満の 🟡 は畳む', () => {
+  const body = buildReviewBody({
+    summary: '指摘なし',
+    demoted: [
+      { comment: comment({ severity: 'critical', body: '誤検知' }), reason: 'refuted by verifier' },
+      { comment: comment({ severity: 'warning', body: '設定で抑止' }), reason: 'below min_severity' },
+    ],
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(!body.includes('行に付けられなかった指摘'));
+  assert.ok(body.includes('その他の観察 (2)'));
+});
+
+test('buildReviewBody: en の見出しも英語で書く', () => {
+  const body = buildReviewBody({
+    summary: 'One finding.',
+    demoted: [{ comment: comment({ severity: 'warning', line: 40, body: 'Swallows the error' }), reason: 'line not in diff hunks' }],
+    language: 'en',
+    meta: {},
+  });
+  assert.ok(body.includes('### Findings not attached to a line (1)\n\n- 🟡 `src/a.ts:40` — Swallows the error'));
+});
+
 test('buildReviewBody: en では定型文も英語で書く', () => {
   const body = buildReviewBody({
     summary: 'One finding.',
