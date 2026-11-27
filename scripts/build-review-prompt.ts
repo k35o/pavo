@@ -43,7 +43,7 @@ import type { ChangedFileEntry, Language, ReviewConfig, ReviewContext } from './
 // Linux refuses to start a process with any single env entry over 128KiB.
 // The JSON copy is the larger one, so the budget is measured on the
 // JSON-escaped prompt and leaves room for claude_args beside it.
-const PROMPT_BYTE_BUDGET = 90000;
+const PROMPT_BYTE_BUDGET = 110000;
 const FILE_LIST_HEAD = 100;
 
 const promptBytes = (prompt: string): number => Buffer.byteLength(JSON.stringify(prompt));
