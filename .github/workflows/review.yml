@@ -287,7 +287,7 @@ jobs:
 
       - id: claude-review
         if: steps.gate.outputs.mode == 'review' && steps.review-prompt.outputs.skip == 'false'
-        uses: anthropics/claude-code-action@v1.0.283
+        uses: anthropics/claude-code-action@v1.0.284
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
@@ -317,7 +317,7 @@ jobs:
       - id: claude-verify
         if: steps.gate.outputs.mode == 'review' && steps.gate.outputs.deep == 'true' && steps.verify-prompt.outputs.skip == 'false'
         continue-on-error: true
-        uses: anthropics/claude-code-action@v1.0.283
+        uses: anthropics/claude-code-action@v1.0.284
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
@@ -366,7 +366,7 @@ jobs:
 
       - id: claude-convo
         if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
-        uses: anthropics/claude-code-action@v1.0.283
+        uses: anthropics/claude-code-action@v1.0.284
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
