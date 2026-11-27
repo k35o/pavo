@@ -3,7 +3,15 @@
   "extends": [
     "github>k35o/renovate-config"
   ],
+  "git-submodules": {
+    "enabled": true
+  },
   "packageRules": [
+    {
+      "description": "practices スキルは自分のリポジトリなので公開直後でも取り込む。git の submodule には公開日時がなく、待機期間を置くと更新が止まる",
+      "matchManagers": ["git-submodules"],
+      "minimumReleaseAge": null
+    },
     {
       "description": "upstream の挙動変更リスク（structured_output / claude_args / sanitizer）があるため、merge 後の最初の PR で dogfood レビューを確認する",
       "matchPackageNames": ["anthropics/claude-code-action"],

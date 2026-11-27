@@ -46,6 +46,15 @@ test('レビュープロンプト: 全 instructions 組み合わせで主要セ�
   }
 });
 
+test('レビュープロンプト: 観点が持つ practices スキルを frontmatter を除いて添付する', () => {
+  const prompt = buildReview({ config: baseConfig({ instructions: 'default,nextjs' }) });
+  assert.ok(prompt.includes('## スキル practices:security'));
+  assert.ok(prompt.includes('## スキル practices:react'));
+  assert.ok(prompt.includes('vendor/claude-plugins/plugins/practices/skills/react/references/'));
+  assert.ok(!prompt.includes('## スキル practices:testing'));
+  assert.ok(!/^name: react$/m.test(prompt));
+});
+
 test('レビュープロンプト: gate が決めた言語だけを指示し、PR から推測させない', () => {
   const english = buildReview({ config: baseConfig({ language: 'en' }) });
   assert.ok(english.includes('`summary` と `comments[].body` は英語で書いてください。'));

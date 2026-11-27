@@ -5,20 +5,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+interface ManifestEntry {
+  deps?: string[];
+  skills?: string[];
+}
+
+export function skillsDir(actionPath: string): string {
+  return path.join(actionPath, 'vendor', 'claude-plugins', 'plugins', 'practices', 'skills');
+}
+
 /**
  * @param actionPath pavo repo checkout
  * @param requested comma-separated names / `./` workspace paths
- * @returns absolute file paths in load order, duplicates removed
+ * @returns absolute instruction file paths and the practices skill names
+ *   they pull in, each in load order with duplicates removed
  */
-export function resolveInstructionFiles(
+export function resolveInstructions(
   actionPath: string,
   requested: string,
   { workspace }: { workspace?: string | null } = {},
-): string[] {
+): { files: string[]; skills: string[] } {
   const manifestPath = path.join(actionPath, 'instructions', 'index.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, string[]>;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, ManifestEntry>;
   const seen = new Set<string>();
   const files: string[] = [];
+  const skills: string[] = [];
 
   const visit = (raw: string, stack: string[]): void => {
     const name = raw.trim();
@@ -54,12 +65,20 @@ export function resolveInstructionFiles(
     if (!Object.hasOwn(manifest, name)) {
       throw new Error(`Unknown instruction: ${name} (known: ${Object.keys(manifest).join(', ')})`);
     }
-    for (const dep of manifest[name] ?? []) {
+    const entry = manifest[name] ?? {};
+    for (const dep of entry.deps ?? []) {
       visit(dep, [...stack, name]);
     }
     const file = path.join(actionPath, 'instructions', `${name}.md`);
     if (!fs.existsSync(file)) {
       throw new Error(`Instruction file missing for "${name}": ${file}`);
+    }
+    for (const skill of entry.skills ?? []) {
+      if (skills.includes(skill)) continue;
+      if (!fs.existsSync(path.join(skillsDir(actionPath), skill, 'SKILL.md'))) {
+        throw new Error(`Skill "${skill}" for "${name}" is missing (git submodule update --init?)`);
+      }
+      skills.push(skill);
     }
     seen.add(name);
     files.push(file);
@@ -68,5 +87,5 @@ export function resolveInstructionFiles(
   for (const raw of requested.split(',')) {
     visit(raw, []);
   }
-  return files;
+  return { files, skills };
 }

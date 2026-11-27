@@ -4,19 +4,28 @@
 
 ## 観点
 
-- **アクセシビリティ (a11y)**
+- **アクセシビリティ (a11y)**（WCAG 2.2 AA を基準にする）
   - セマンティック HTML を使っているか（`<button>`, `<a>`, `<nav>`, `<main>`, `<dialog>` 等）
   - ARIA は補助であり、ネイティブ要素を優先しているか
   - キーボードのみで操作完結できるか（focus 順序、`:focus-visible`、focus trap）
+  - フォーカスした要素が固定ヘッダーやバナーの下に隠れないか（`scroll-padding` などで避けているか）
+  - クリックやタップの対象が 24×24 CSS px 以上あるか、小さい場合は周りに同じだけの間隔があるか
+  - ドラッグでしかできない操作に、クリックやキーボードで済む代わりの手段があるか
   - 画像の `alt`、フォームの `label`、見出しの階層が論理的か
   - 色のみに頼らず、コントラスト比 4.5:1 以上を確保しているか
   - 動的更新は `aria-live` 等で支援技術に伝わるか
+- **ダイアログとポップオーバー**
+  - モーダルを自前の `div` と focus trap で組まず、`<dialog>` の `showModal()` で開いているか。背景を操作不能にする処理を自前で書いていないか（`inert` で足りないか）
+  - メニューやツールチップなど非モーダルの重ね表示は `popover` 属性で書けないか
 - **フォーム**
   - ネイティブの validation 属性 (`required`, `type`, `pattern`, `min`/`max`) を活用しているか
+  - エラーの表示を `:invalid` ではなく `:user-invalid` で出し、入力前からエラーに見せていないか
   - エラーメッセージが該当フィールドに `aria-describedby` 等で紐づいているか
+  - 同じ手続きの中で入力済みの情報を再入力させていないか、パスワードの貼り付けやパスワードマネージャーの自動入力を妨げていないか（`autocomplete` の指定を含む）
   - submit 時の二重送信防止と pending 表示があるか
-- **パフォーマンス**
-  - 画像は適切なフォーマット (AVIF / WebP)、`loading="lazy"`、`width`/`height` 指定があるか
+- **パフォーマンス**（Core Web Vitals の LCP / INP / CLS）
+  - 画像は適切なフォーマット (AVIF / WebP)、`width`/`height` 指定があるか。LCP になる画像に `loading="lazy"` を付けず、`fetchpriority="high"` を付けているか
+  - クリック・入力のハンドラが長いタスクで描画を塞いでいないか（INP）。重い処理を分割する、`scheduler.yield()` で譲る、描画に関係ない処理を後回しにする
   - クリティカル JS / CSS が肥大化していないか
   - 大きな依存は dynamic import で必要時に遅延読み込みできているか
   - レイアウトシフト (CLS) を防ぐスペース予約があるか
@@ -31,5 +40,6 @@
   - URL に持たせるべき状態 (フィルタ、タブ、ページング) が State に閉じ込められていないか
   - `localStorage` 等の永続化キーに命名規則・バージョン互換が考慮されているか
 - **互換性**
-  - サポート対象ブラウザで動く API を使っているか
+  - サポート対象ブラウザで動く API を使っているか。新しい CSS や Web API は Baseline の状態（Widely available か Newly available か）を目安にし、Newly available 以前の機能には代替表示（`@supports` など）があるか
   - polyfill は必要な箇所だけに限定されているか
+  - Baseline で広く使える機能で置き換えられる JS や依存を新たに足していないか（`:has()`、container queries、`structuredClone`、View Transitions など）

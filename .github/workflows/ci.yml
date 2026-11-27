@@ -24,6 +24,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          submodules: true
       - uses: github/gh-actions-lock@verify/v0.5.1
       - uses: jdx/mise-action@v5.2.9
       # typescript is a dev-only dependency; the action itself runs the .ts

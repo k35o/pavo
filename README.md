@@ -87,18 +87,21 @@ Client ID / Private key は `actions/create-github-app-token` にだけ渡り、
 - 常時ロード — [`system.md`](instructions/system.md)（レビューの進め方・信頼境界・severity rubric・verdict 判定）と [`formatting.md`](instructions/formatting.md)（Markdown の書き方）。スレッド返信では [`conversation.md`](instructions/conversation.md) が persona になる
 - opt-in 観点 — caller 側で `instructions: default,nextjs` のようにカンマ区切りで選ぶ
 
-| 観点 | カバー範囲 | 継承 |
-| --- | --- | --- |
-| [`default`](instructions/default.md) | バグ・可読性・テスト・ドキュメント・PR description との整合・**セキュリティ** | — |
-| [`frontend`](instructions/frontend.md) | a11y・フォーム・レイアウトシフト・i18n | — |
-| [`react`](instructions/react.md) | `useEffect` 濫用回避・Concurrent Mode・React 19 | `frontend` |
-| [`nextjs`](instructions/nextjs.md) | App Router・Server / Client 境界・Server Actions | `frontend` + `react` |
-| [`typescript`](instructions/typescript.md) | 型の抜け穴・ユニオン網羅性・immutability・型設計 | — |
-| [`node`](instructions/node.md) | ESM/CJS・async・stream・child_process・プロセス管理 | `typescript` |
-| [`github-actions`](instructions/github-actions.md) | script injection・permissions・SHA ピン・シェル堅牢性 | — |
-| [`walkthrough`](instructions/walkthrough.md) | レビュー冒頭に変更サマリテーブル + Mermaid 図を追加出力 | — |
+| 観点 | カバー範囲 | 継承 | スキル |
+| --- | --- | --- | --- |
+| [`default`](instructions/default.md) | バグ・可読性・テスト・ドキュメント・PR description との整合・**セキュリティ** | — | `security` |
+| [`frontend`](instructions/frontend.md) | WCAG 2.2 の a11y・dialog と popover・フォーム・Core Web Vitals（LCP / INP / CLS）・Baseline | — | — |
+| [`react`](instructions/react.md) | スキルの当てはめ方（React のバージョンと Compiler の確認）と指摘の重さ | `frontend` | `react` |
+| [`nextjs`](instructions/nextjs.md) | Next.js 16 の App Router・Server / Client 境界・Cache Components・Server Functions・proxy | `frontend` + `react` | — |
+| [`typescript`](instructions/typescript.md) | 型の抜け穴・ユニオン網羅性・erasable syntax・TypeScript 6 / 7 で消えたオプションと変わった既定値・7 への移行・`using` | — | — |
+| [`node`](instructions/node.md) | ESM/CJS と `require(esm)`・type stripping・async・stream・child_process・標準 API・pnpm のサプライチェーン設定 | `typescript` | — |
+| [`github-actions`](instructions/github-actions.md) | script injection・permissions と App token・`actions.lock` と SHA ピン・シェル堅牢性 | — | — |
+| [`testing`](instructions/testing.md) | 振る舞いの検証・リテラルの期待値・テストダブル・安定性・過不足 | — | `testing` |
+| [`walkthrough`](instructions/walkthrough.md) | レビュー冒頭に変更サマリテーブル + Mermaid 図を追加出力 | — | — |
 
 依存関係は [`instructions/index.json`](instructions/index.json) で定義しており、`nextjs` を指定すると `frontend` + `react` も自動ロードされる。未知の観点名や `.md` の欠落は **エラーで落ちる**（黙って観点が欠けたままレビューしない）。
+
+React、テスト、セキュリティの知識は、k8o が普段の実装でも使う [`k35o/claude-plugins`](https://github.com/k35o/claude-plugins) の `practices` プラグインのスキルを正本にしている。Pavo はこのリポジトリを `vendor/claude-plugins` に git submodule として取り込み、観点が `index.json` で指定したスキルの `SKILL.md` をプロンプトに添付する（スキル内の参照資料は Claude が `Read` で読む）。submodule のコミットは Pavo のコミットに含まれるので、caller の 1 つの pin でスキルの版も決まる。更新は Renovate が submodule の digest を上げる PR で取り込む。ローカルで CI を回すときは `git submodule update --init` で取り出しておく。
 
 `./` で始まるエントリは対象リポジトリ内のファイルとして解決される: `instructions: default,./docs/review/backend.md` のように、fork せずにリポジトリ独自の観点を追加できる。注意: このファイルだけは **PR head の内容**が使われる（観点ファイルの追加・修正をその PR 自身で有効にするため）。観点ファイルを変更する PR は中身も diff としてレビューされる。
 

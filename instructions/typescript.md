@@ -11,7 +11,7 @@
   - `!`（non-null assertion）の根拠が同じスコープ内で実際に保証されているか
   - `@ts-expect-error` は抑制ではなく原因の修正で解消できないか。残す場合も抑制範囲が最小か
   - `Function` 型や `(...args: any[]) => void` でシグネチャ検査を放棄せず、実際の呼び出し形に合った関数型を書けないか
-  - tsconfig の `strict` や `noUncheckedIndexedAccess` 等の検査オプションを緩める変更が紛れ込んでいないか
+  - tsconfig の検査を緩める変更（`"strict": false` の追加、`noUncheckedIndexedAccess` を外すなど）が紛れ込んでいないか。6.0 から `strict` は既定で有効なので、`"strict": true` を消すだけなら緩和ではない
 - **ユニオン型と網羅性**
   - 状態を boolean の組み合わせではなく判別可能ユニオン（discriminated union）で表現しているか
   - ユニオンを分岐する `switch` に網羅性検査（`default` で `never` へ代入、または `satisfies never`）があり、ケース追加漏れをコンパイルエラーにできるか
@@ -37,9 +37,25 @@
   - 1 箇所でしか現れない型パラメータはないか（具体型やユニオンで十分でないか）
   - 同じ構造の型を複数コピペしておりジェネリクスで統一すべき箇所はないか
   - `extends` 制約が緩すぎて実装内に `as` が必要になっていないか。逆に狭すぎて呼び出し側を不要に縛っていないか
-- **enum vs union**
+- **enum vs union と型だけで消える構文**
   - 新規の `enum` はリテラルユニオン（+ 必要なら `as const` オブジェクト）で代替できないか（特に数値 enum は避ける）
   - `const enum` を使っていないか（isolatedModules 前提のビルドと相性が悪い）
+  - tsconfig に `erasableSyntaxOnly` があるプロジェクト（Node の type stripping で `.ts` を直接動かすもの）で、型を消すだけでは JS にならない構文（`enum`、ランタイムのコードを持つ `namespace` / `module`、コンストラクタの parameter properties、`import =` / `export =`、`<T>x` 形式の型アサーション）を足していないか。型だけの `namespace` は対象外
+  - `verbatimModuleSyntax` が有効なら、型だけの import / export に `import type` / `export type` を使っているか
+- **tsconfig と TypeScript のバージョン**（先に `package.json` の `typescript` のバージョンを確認する）
+  - 6.0 で削除されたもの（`outFile`、`moduleResolution: "classic"`、`module` の `amd` / `umd` / `system` / `none`、`/// <reference no-default-lib="true"/>`）を使っていないか
+  - 6.0 で非推奨になり 7.0 で削除されたもの（`baseUrl`、`moduleResolution: "node"`（node10）、`target: "es5"`、`downlevelIteration`）を使っていないか。`"ignoreDeprecations": "6.0"` で警告を黙らせただけの変更は、7.0 に上げると壊れる
+  - 6.0 から `false` にできなくなった `esModuleInterop` / `allowSyntheticDefaultImports` / `alwaysStrict` を `false` にしていないか。`module Foo {}` は `namespace Foo {}`、`import … assert {}` は `with {}` に書き換えているか（7.0 では使えない）
+  - 6.0 で既定が変わり、設定を書かないと壊れる箇所を手当てしているか
+    - `types` の既定が `[]` になった。`process` や `describe` などのグローバル型を使うなら `"types": ["node", …]` を明示する
+    - `rootDir` の既定が tsconfig のあるディレクトリになった。tsconfig が `src` の外にあると出力が `dist/src/…` にずれるので、`rootDir` を明示する
+    - `noUncheckedSideEffectImports` が既定で有効になった。`import './x.css'` のような副作用 import に型宣言があるか
+  - tsconfig のあるディレクトリで `tsc a.ts` のようにファイルを渡す scripts（lint-staged など）は、6.0 から TS5112 のエラーになる。`--ignoreConfig` を付けているか
+  - `typescript` を 7 に上げる PR では、コンパイラの API を使うツール（typescript-eslint など）が動くか。7.0 は API を同梱しないので、そうしたツールのために `@typescript/typescript6`（実行ファイルは `tsc6`）を並べて入れる。Vue / Astro / Svelte / MDX などテンプレートの型検査も 7.0 では動かない
+  - `checkJs` で JS を検査しているリポジトリでは、7.0 で JSDoc の解釈が変わる（`@enum` は特別扱いされない、Closure 形式の関数型は書けない）
+  - `paths` を `baseUrl` なしで解決できる相対パスで書いているか、Node の subpath imports（`package.json` の `imports` と `#` 始まりの指定子。`#/` 始まりは 6.0 から `nodenext` / `bundler` で解決できる）で置き換えられないか
+- **リソースの後始末**
+  - ファイルハンドル、ロック、一時ディレクトリなど、確実に閉じたいリソースを `try` / `finally` で手書きしている箇所は `using` / `await using`（`Symbol.dispose` / `Symbol.asyncDispose`）で書けないか。実行環境（Node 24 以降、対応ブラウザ）が `using` を扱えるか合わせて確認する
 - **utility type**
   - 既存の型から導出できるものを手書きで複製していないか（`Pick` / `Omit` / `Partial` / `Parameters` / `ReturnType` 等）
   - 型の source of truth が 1 箇所に保たれているか（スキーマや定数からの `typeof` 導出を含む）

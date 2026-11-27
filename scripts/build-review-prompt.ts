@@ -28,7 +28,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { setOutputs, warning } from './lib/actions.ts';
-import { resolveInstructionFiles } from './lib/instructions.ts';
+import { resolveInstructions, skillsDir } from './lib/instructions.ts';
 import {
   prDescriptionSection,
   readIfExists,
@@ -43,7 +43,7 @@ import type { ChangedFileEntry, Language, ReviewConfig, ReviewContext } from './
 // Linux refuses to start a process with any single env entry over 128KiB.
 // The JSON copy is the larger one, so the budget is measured on the
 // JSON-escaped prompt and leaves room for claude_args beside it.
-const PROMPT_BYTE_BUDGET = 90000;
+const PROMPT_BYTE_BUDGET = 110000;
 const FILE_LIST_HEAD = 100;
 
 const promptBytes = (prompt: string): number => Buffer.byteLength(JSON.stringify(prompt));
@@ -59,6 +59,23 @@ function languageSection(language: Language): string {
   return language === 'ja'
     ? '## 出力言語\n\n`summary` と `comments[].body` は日本語で書いてください。\n'
     : '## 出力言語\n\n`summary` と `comments[].body` は英語で書いてください。この指示が日本語でも、出力は英語です。\n';
+}
+
+function skillSection(actionPath: string, skill: string): string {
+  const dir = path.join(skillsDir(actionPath), skill);
+  const body = fs
+    .readFileSync(path.join(dir, 'SKILL.md'), 'utf8')
+    .replace(/^---\n[\s\S]*?\n---\n/, '')
+    .trim();
+  const references = path.join(dir, 'references');
+  return (
+    `## スキル practices:${skill}\n\n` +
+    'k8o が実装とレビューで使っている知識です。観点ファイルと合わせて、指摘の根拠にする基準として扱ってください。\n' +
+    (fs.existsSync(references)
+      ? `スキル内で参照している資料は \`${references}/\` にあり、必要になったら \`Read\` で読めます。\n`
+      : '') +
+    `\n${body}\n`
+  );
 }
 
 function intentSection(context: ReviewContext | null): string | null {
@@ -292,8 +309,12 @@ export function buildReviewPrompt({
 
   sections.push(languageSection(config.language));
 
-  for (const file of resolveInstructionFiles(actionPath, config.instructions, { workspace })) {
+  const { files, skills } = resolveInstructions(actionPath, config.instructions, { workspace });
+  for (const file of files) {
     sections.push(`${fs.readFileSync(file, 'utf8').trimEnd()}\n`);
+  }
+  for (const skill of skills) {
+    sections.push(skillSection(actionPath, skill));
   }
 
   if (conventionsMd) {
