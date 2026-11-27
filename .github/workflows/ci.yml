@@ -21,9 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      - uses: github/gh-actions-lock@verify/v0.5.1
       # typescript is a dev-only dependency; the action itself runs the .ts
       # sources directly via Node's built-in type stripping (no build step).
       - run: npm ci

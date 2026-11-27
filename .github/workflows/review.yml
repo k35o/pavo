@@ -93,7 +93,7 @@ jobs:
       # separate `uses: k35o/pavo@<sha>` action instead meant hard-coding that
       # SHA here (`uses:` takes no expressions), and a commit cannot name its
       # own SHA, so callers always ran the action one version behind.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -104,7 +104,7 @@ jobs:
       - run: mv .pavo "${RUNNER_TEMP}/pavo-src"
 
       - id: app-token
-        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        uses: actions/create-github-app-token@v3.4.0
         with:
           client-id: ${{ secrets.K35O_BOT_CLIENT_ID }}
           private-key: ${{ secrets.K35O_BOT_PRIVATE_KEY }}
@@ -206,7 +206,7 @@ jobs:
       # .git/config; claude-code-action still writes its own git auth there, so
       # the claude steps below additionally deny Read on .git/.
       - if: steps.gate.outputs.mode != 'skip'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ steps.gate.outputs.head_sha }}
           fetch-depth: 1
@@ -263,7 +263,7 @@ jobs:
 
       - id: claude-review
         if: steps.gate.outputs.mode == 'review' && steps.review-prompt.outputs.skip == 'false'
-        uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
+        uses: anthropics/claude-code-action@v1.0.283
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
@@ -292,7 +292,7 @@ jobs:
       - id: claude-verify
         if: steps.gate.outputs.mode == 'review' && steps.gate.outputs.deep == 'true' && steps.verify-prompt.outputs.skip == 'false'
         continue-on-error: true
-        uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
+        uses: anthropics/claude-code-action@v1.0.283
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
@@ -341,7 +341,7 @@ jobs:
 
       - id: claude-convo
         if: steps.gate.outputs.mode == 'convo' && steps.convo-prompt.outputs.skip == 'false'
-        uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
+        uses: anthropics/claude-code-action@v1.0.283
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
