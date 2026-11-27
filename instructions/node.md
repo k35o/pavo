@@ -11,9 +11,10 @@ Node.js (>= 22) で動くサーバー・CLI・スクリプトに関わる観点�
   - CJS から ESM を読むためだけに dynamic `import()` や変換ツールを足していないか（Node 22.12 以降は `require(esm)` が既定で使える）
   - ESM で `__dirname` / `__filename` を前提にしていないか → `import.meta.dirname` / `import.meta.filename`
 - **TypeScript を直接実行するコード**
-  - type stripping（Node 22.18 以降で既定）で `.ts` を直接動かすなら、import 指定子に `.ts` の拡張子を書いているか、型だけの import に `import type` を使っているか
-  - `enum` や `namespace` など、型を消すだけでは動かない構文を使っていないか（`tsconfig` の `erasableSyntaxOnly` で検出できる）
-  - 直接実行できるのにビルド手順や `ts-node` / `tsx` を新たに持ち込んでいないか
+  - type stripping（Node 22.18 以降で既定、24.12 で stable）で `.ts` を直接動かすなら、import 指定子に `.ts` の拡張子を書いているか、型だけの import に `import type` を使っているか。tsc で型検査するなら `rewriteRelativeImportExtensions`（出力しないなら `allowImportingTsExtensions`）を設定しているか
+  - `enum` や、ランタイムのコードを持つ `namespace` など、型を消すだけでは動かない構文を使っていないか（`tsconfig` の `erasableSyntaxOnly` で検出できる）。`--experimental-transform-types` は Node 26 で削除されたので、フラグで動かす逃げ道はない
+  - `erasableSyntaxOnly` では検出できない制限に当たっていないか（デコレータはパースエラーになる、`.tsx` は動かない、`paths` は解決されない、`node_modules` の中の `.ts` は処理されない）
+  - 直接実行できるのにビルド手順や `ts-node` / `tsx` を新たに持ち込んでいないか。上の制限に当たる（`paths` やデコレータが要る）なら `tsx` を使う理由になる
 - **async の落とし穴**
   - 投げっぱなしの Promise（`await` も `.catch()` もない呼び出し）が unhandled rejection にならないか
   - 依存関係のない `await` が直列に並んでいないか → `Promise.all` で並行化
