@@ -6,16 +6,16 @@ workflows:
     '.github/workflows/ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'github/gh-actions-lock@verify/v0.5.1'
-        - 'jdx/mise-action@v5.2.9'
+        - 'jdx/mise-action@v5.2.10'
         - 'zizmorcore/zizmor-action@v0.8.1'
     '.github/workflows/credential-check.yml':
         - 'actions/create-github-app-token@v3.4.0'
-        - 'anthropics/claude-code-action@v1.0.283'
+        - 'anthropics/claude-code-action@v1.0.284'
     '.github/workflows/pavo.yml': []
     '.github/workflows/review.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/create-github-app-token@v3.4.0'
-        - 'anthropics/claude-code-action@v1.0.283'
+        - 'anthropics/claude-code-action@v1.0.284'
 dependencies:
     'actions/checkout@v7.0.1':
         ref: 'v7.0.1'
@@ -27,9 +27,9 @@ dependencies:
         commit: 'sha1-f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc'
         owner_id: 44036562
         repo_id: 642580244
-    'anthropics/claude-code-action@v1.0.283':
-        ref: 'v1.0.283'
-        commit: 'sha1-f431adaf77e0fecf918431e75a2b5b45b85af002'
+    'anthropics/claude-code-action@v1.0.284':
+        ref: 'v1.0.284'
+        commit: 'sha1-c84e279f859e2591391e95bd309286eb111c345f'
         owner_id: 76263028
         repo_id: 986421638
         uses:
@@ -44,9 +44,9 @@ dependencies:
         commit: 'sha1-5fa07d19c267d19e29f4341f10fdf7f516375038'
         owner_id: 9919
         repo_id: 1217640442
-    'jdx/mise-action@v5.2.9':
-        ref: 'v5.2.9'
-        commit: 'sha1-236a21c3b91f5db6d4e174b348674a0f0caac06d'
+    'jdx/mise-action@v5.2.10':
+        ref: 'v5.2.10'
+        commit: 'sha1-90f833d396d0cc3674b631d2d225e306476c303a'
         owner_id: 216188
         repo_id: 738284564
     'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6':
