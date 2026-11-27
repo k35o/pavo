@@ -30,7 +30,6 @@ test('selectBlocking は critical / warning だけを対象にする', () => {
     raw({ severity: 'critical' }),
     raw({ severity: 'suggestion' }),
     raw({ severity: 'warning' }),
-    raw({ severity: 'praise' }),
   ];
   assert.deepEqual(
     selectBlocking(comments).map((comment) => comment.severity),

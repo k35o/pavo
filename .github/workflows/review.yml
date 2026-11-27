@@ -223,12 +223,15 @@ jobs:
           BOT_NAME: ${{ steps.bot.outputs.name }}
           HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
           OUT_DIR: ${{ runner.temp }}/pavo
+          ON_DEMAND: ${{ steps.gate.outputs.on_demand }}
         run: |
           set -euo pipefail
           node "${RUNNER_TEMP}/pavo-src/scripts/collect-context.ts"
 
+      # Every later review-path step keys off review-prompt's skip output, so
+      # leaving this step out is enough to stop the review.
       - id: review-prompt
-        if: steps.gate.outputs.mode == 'review'
+        if: steps.gate.outputs.mode == 'review' && steps.context.outputs.unchanged == 'false'
         env:
           ACTION_PATH: ${{ runner.temp }}/pavo-src
           CONFIG: ${{ steps.gate.outputs.config }}

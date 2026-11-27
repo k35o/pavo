@@ -2,7 +2,7 @@
 // loosely (only the fields we actually touch) — mirroring the full REST/
 // GraphQL schema here would be maintenance without safety.
 
-export type Severity = 'critical' | 'warning' | 'suggestion' | 'praise';
+export type Severity = 'critical' | 'warning' | 'suggestion';
 
 export type Language = 'ja' | 'en';
 
@@ -11,7 +11,7 @@ export interface PavoConfig {
   extraPrompt: string;
   language: 'auto' | Language;
   approve: boolean;
-  minSeverity: Exclude<Severity, 'praise'>;
+  minSeverity: Severity;
   model: string;
   reviewDrafts: boolean;
   ignore: string[];
@@ -50,6 +50,7 @@ export interface ThreadSummary {
   isResolved: boolean;
   isOutdated: boolean;
   byPavo: boolean;
+  severity: Severity | null;
   repliesTruncated: boolean;
   comments: ThreadComment[];
 }
@@ -99,4 +100,5 @@ export interface ReviewContext {
   changedFiles: ChangedFileEntry[];
   linkedIssues?: LinkedIssue[];
   commitMessages?: string[];
+  diffFingerprint?: string;
 }

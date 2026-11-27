@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractLastReviewedSha } from '../scripts/collect-context.ts';
+import { extractLastReviewMeta } from '../scripts/collect-context.ts';
 import { parseFindingMarker, stripFindingMarkers } from '../scripts/lib/markers.ts';
 import { parsePatchLines } from '../scripts/lib/patch.ts';
 import {
   buildReviewBody,
+  countOpenBlockingThreads,
   decideEvent,
   filterResolvableRootIds,
   isNoopSuggestion,
@@ -13,7 +14,7 @@ import {
   renderCommentBody,
   sanitizeSuggestion,
 } from '../scripts/post-review.ts';
-import type { PavoConfig, ReviewFinding } from '../scripts/lib/types.ts';
+import type { PavoConfig, ReviewFinding, ThreadSummary } from '../scripts/lib/types.ts';
 
 const CONFIG: Pick<PavoConfig, 'ignore' | 'minSeverity' | 'approve'> = {
   ignore: ['*.lock'],
@@ -37,14 +38,14 @@ const comment = (overrides: Partial<ReviewFinding> = {}): ReviewFinding => ({
   ...overrides,
 });
 
-test('confidence 80 未満は drop（praise は対象外）', () => {
+test('confidence 80 未満は drop', () => {
   const { inline, dropped } = partitionComments(
-    [comment({ confidence: 79 }), comment({ severity: 'praise', confidence: 0 })],
+    [comment({ confidence: 79 }), comment({ severity: 'suggestion', confidence: 80 })],
     CONFIG,
     FILES,
   );
   assert.equal(inline.length, 1);
-  assert.equal(inline[0]!.severity, 'praise');
+  assert.equal(inline[0]!.severity, 'suggestion');
   assert.equal(dropped.length, 1);
   assert.match(dropped[0]!.reason, /confidence/);
 });
@@ -61,6 +62,7 @@ test('壊れた指摘（path/line/body 欠落・未知 severity）は drop', () 
       comment({ line: Number.NaN }),
       comment({ body: '   ' }),
       comment({ severity: 'blocker' as ReviewFinding['severity'] }),
+      comment({ severity: 'praise' as ReviewFinding['severity'] }),
     ],
     CONFIG,
     FILES,
@@ -69,7 +71,7 @@ test('壊れた指摘（path/line/body 欠落・未知 severity）は drop', () 
   assert.equal(demoted.length, 0);
   assert.deepEqual(
     dropped.map((entry) => entry.reason),
-    ['malformed', 'malformed', 'malformed', 'unknown severity: blocker'],
+    ['malformed', 'malformed', 'malformed', 'unknown severity: blocker', 'unknown severity: praise'],
   );
 });
 
@@ -114,10 +116,56 @@ test('decideEvent: 🔴/🟡 があると approve でも COMMENT、approve=false
   assert.equal(decideEvent('approve', [], [], { ...CONFIG, approve: false }, false), 'COMMENT');
 });
 
+const thread = (overrides: Partial<ThreadSummary> = {}): ThreadSummary => ({
+  rootId: 1,
+  path: 'src/a.ts',
+  line: 2,
+  isResolved: false,
+  isOutdated: false,
+  byPavo: true,
+  severity: 'warning',
+  repliesTruncated: false,
+  comments: [],
+  ...overrides,
+});
+
+test('countOpenBlockingThreads: 未解決の自分の 🔴/🟡 スレッドを数える', () => {
+  const threads = [
+    thread({ rootId: 1, severity: 'critical' }),
+    thread({ rootId: 2, severity: 'warning' }),
+    thread({ rootId: 3, severity: 'suggestion' }),
+    thread({ rootId: 4, isResolved: true }),
+    thread({ rootId: 5, byPavo: false }),
+    thread({ rootId: 6, severity: null }),
+  ];
+  assert.equal(countOpenBlockingThreads(threads, []), 2);
+});
+
+test('countOpenBlockingThreads: この実行で resolve するスレッドは数えない', () => {
+  const threads = [thread({ rootId: 1 }), thread({ rootId: 2 })];
+  assert.equal(countOpenBlockingThreads(threads, [2]), 1);
+  assert.equal(countOpenBlockingThreads(threads, [1, 2]), 0);
+});
+
+test('buildReviewBody: 未解決スレッドで承認を見送ったときは、その理由を本文に書く', () => {
+  const body = buildReviewBody({
+    summary: '問題は見つかりませんでした。',
+    inline: [],
+    demoted: [],
+    heldByThreads: 2,
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(body.includes('🔴 / 🟡 のスレッドが 2 件未解決のため、承認していません。'));
+  assert.ok(
+    !buildReviewBody({ summary: '問題なし', inline: [], demoted: [], language: 'ja', meta: {} }).includes('承認していません'),
+  );
+});
+
 test('decideEvent: 自分が作成した PR は APPROVE できないので COMMENT', () => {
   assert.equal(decideEvent('approve', [], [], CONFIG, true), 'COMMENT');
   assert.equal(
-    decideEvent('approve', [comment({ severity: 'praise' })], [], CONFIG, true),
+    decideEvent('approve', [comment({ severity: 'suggestion' })], [], CONFIG, true),
     'COMMENT',
   );
 });
@@ -184,19 +232,47 @@ test('renderCommentBody: 絵文字付与と suggestion フェンス', () => {
 
 test('buildReviewBody: demote 一覧と meta マーカーを含む', () => {
   const body = buildReviewBody({
-    summary: 'TL;DR: 問題なし',
+    summary: '問題は見つかりませんでした。',
+    inline: [],
     demoted: [{ comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' }],
     language: 'ja',
     meta: { sha: 'abc', instructions: 'default', model: 'sonnet' },
   });
   assert.ok(body.includes('<details>'));
   assert.ok(body.includes('その他の観察 (1)'));
+  assert.ok(body.includes('- 🔵 `src/a.ts:2` — x が漏れています\n'));
   assert.match(body, /<!-- pavo:meta \{"sha":"abc"/);
+});
+
+test('buildReviewBody: 投稿した指摘の件数を summary の前に 1 行で付ける', () => {
+  const body = buildReviewBody({
+    summary: '`parseDate` が UTC を考慮していません。直してからマージしてください。',
+    inline: [comment({ severity: 'critical' }), comment({ severity: 'suggestion' }), comment({ severity: 'suggestion' })],
+    demoted: [
+      { comment: comment({ severity: 'warning' }), reason: 'line not in diff hunks' },
+      { comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' },
+    ],
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(body.startsWith('🔴 1 · 🟡 1 · 🔵 2\n\n`parseDate` が UTC を考慮していません。'));
+});
+
+test('buildReviewBody: 投稿した指摘が 0 件なら件数の行を付けない', () => {
+  const body = buildReviewBody({
+    summary: '問題は見つかりませんでした。',
+    inline: [],
+    demoted: [{ comment: comment({ severity: 'suggestion' }), reason: 'below min_severity' }],
+    language: 'ja',
+    meta: {},
+  });
+  assert.ok(body.startsWith('問題は見つかりませんでした。'));
 });
 
 test('buildReviewBody: 行に付けられなかった 🔴/🟡 は畳まずに本文に出す', () => {
   const body = buildReviewBody({
     summary: '指摘 2 件',
+    inline: [],
     demoted: [
       { comment: comment({ severity: 'critical', line: 40, body: 'SQL を連結しています' }), reason: 'line not in diff hunks' },
       { comment: comment({ severity: 'warning', path: 'src/b.ts', body: '例外が握りつぶされます' }), reason: 'inline post failed' },
@@ -216,6 +292,7 @@ test('buildReviewBody: 行に付けられなかった 🔴/🟡 は畳まずに�
 test('buildReviewBody: 反証された 🔴/🟡 や min_severity 未満の 🟡 は畳む', () => {
   const body = buildReviewBody({
     summary: '指摘なし',
+    inline: [],
     demoted: [
       { comment: comment({ severity: 'critical', body: '誤検知' }), reason: 'refuted by verifier' },
       { comment: comment({ severity: 'warning', body: '設定で抑止' }), reason: 'below min_severity' },
@@ -225,11 +302,14 @@ test('buildReviewBody: 反証された 🔴/🟡 や min_severity 未満の 🟡
   });
   assert.ok(!body.includes('行に付けられなかった指摘'));
   assert.ok(body.includes('その他の観察 (2)'));
+  assert.ok(!body.includes('refuted by verifier'));
+  assert.ok(!body.includes('below min_severity'));
 });
 
 test('buildReviewBody: en の見出しも英語で書く', () => {
   const body = buildReviewBody({
     summary: 'One finding.',
+    inline: [],
     demoted: [{ comment: comment({ severity: 'warning', line: 40, body: 'Swallows the error' }), reason: 'line not in diff hunks' }],
     language: 'en',
     meta: {},
@@ -240,6 +320,7 @@ test('buildReviewBody: en の見出しも英語で書く', () => {
 test('buildReviewBody: en では定型文も英語で書く', () => {
   const body = buildReviewBody({
     summary: 'One finding.',
+    inline: [],
     demoted: [{ comment: comment({ severity: 'suggestion', body: 'Could share a helper' }), reason: 'below min_severity' }],
     reductions: ['left out the existing conversation'],
     language: 'en',
@@ -252,7 +333,8 @@ test('buildReviewBody: en では定型文も英語で書く', () => {
 
 test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を本文に書く', () => {
   const body = buildReviewBody({
-    summary: 'TL;DR: 問題なし',
+    summary: '問題は見つかりませんでした。',
+    inline: [],
     demoted: [],
     reductions: ['削除されたファイルと内容の変わらない rename を件数だけにまとめた', '解決済みスレッドとコメント履歴を省いた'],
     language: 'ja',
@@ -264,12 +346,13 @@ test('buildReviewBody: プロンプトを縮めたときは、縮めた内容を
         '削除されたファイルと内容の変わらない rename を件数だけにまとめた、解決済みスレッドとコメント履歴を省いた',
     ),
   );
-  assert.ok(!buildReviewBody({ summary: 'TL;DR', demoted: [], language: 'ja', meta: {} }).includes('ℹ️'));
+  assert.ok(!buildReviewBody({ summary: '問題なし', inline: [], demoted: [], language: 'ja', meta: {} }).includes('ℹ️'));
 });
 
 test('buildReviewBody: サマリが長くて切り詰めても、縮めた旨は残る', () => {
   const body = buildReviewBody({
     summary: 'あ'.repeat(70000),
+    inline: [],
     demoted: [],
     reductions: ['既存の会話を省いた'],
     language: 'ja',
@@ -286,14 +369,16 @@ test('finding マーカーは parseFindingMarker で roundtrip し、strip で�
   assert.ok(!stripFindingMarkers(body).includes('pavo:finding'));
 });
 
-test('meta マーカーは extractLastReviewedSha で roundtrip する', () => {
+test('meta マーカーは extractLastReviewMeta で roundtrip する', () => {
   const sha = 'f'.repeat(40);
+  const diff = 'a'.repeat(64);
   const body = buildReviewBody({
     summary: 'サマリ',
+    inline: [],
     demoted: [],
     language: 'ja',
-    meta: { sha, instructions: 'default', model: 'sonnet' },
+    meta: { sha, diff, instructions: 'default', model: 'sonnet' },
   });
   const reviews = [{ author: { login: 'k35o-bot' }, body }];
-  assert.equal(extractLastReviewedSha(reviews, 'k35o-bot[bot]'), sha);
+  assert.deepEqual(extractLastReviewMeta(reviews, 'k35o-bot[bot]'), { sha, diff });
 });

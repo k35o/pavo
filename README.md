@@ -97,10 +97,11 @@ Client ID / Private key は `actions/create-github-app-token` にだけ渡り、
 
 ## レビューの動作
 
-- 重要度は絵文字で表現: 🔴 Critical / 🟡 Warning / 🔵 Suggestion / 👍 Praise
-- 各指摘には confidence (0-100) が自己採点され、**80 未満は投稿されない**（praise を除く）。confidence は検証の到達度（反証を試みたか）に紐づけて採点される
+- 重要度は絵文字で表現: 🔴 Critical / 🟡 Warning / 🔵 Suggestion。良い実装を褒めるだけの指摘は出さない
+- レビュー本文は、投稿した指摘の件数（`🔴 1 · 🟡 0 · 🔵 2`、0 件なら省略）、マージしてよいか・何を直すかの結論、折りたたんだ「確認した範囲」の順に並ぶ。件数の行は Pavo のスクリプトが実際に投稿した指摘から数える
+- 各指摘には confidence (0-100) が自己採点され、**80 未満は投稿されない**。confidence は検証の到達度（反証を試みたか）に紐づけて採点される
 - PR にリンクされた issue（closing references）とコミットメッセージがプロンプトに注入され、「issue の要件を満たしているか」「宣言されていない変更が紛れていないか」の判断材料になる
-- 🔴 / 🟡 が 0 件なら `APPROVE`（🔵 / 👍 の指摘は APPROVE と同時に inline 投稿される）。`approve: false` で常に `COMMENT` にできる — **branch protection の承認数に Pavo を数えたくない場合はこれを使う**
+- 🔴 / 🟡 が 0 件で、前回までに Pavo が付けた 🔴 / 🟡 のスレッドもすべて resolve されていれば `APPROVE`（🔵 の指摘は APPROVE と同時に inline 投稿される）。未解決のスレッドが残っているときは、その件数を本文に書いて `COMMENT` にする。`approve: false` で常に `COMMENT` にできる — **branch protection の承認数に Pavo を数えたくない場合はこれを使う**
 - PR の作成者が Pavo と同じ App の場合（同じ App で self-hosted Renovate やリリース bot を動かしている構成）は、GitHub が自分の PR への APPROVE を拒否するため自動的に `COMMENT` になる。レビュー自体は通常どおり行われる
 - `pavo:deep` label 付き PR では、レビュー後に**独立した検証セッション**が 🔴 / 🟡 の各指摘への反証を試みる。反証された指摘は「その他の観察」に降格され（反証理由付き）、判断できなかった指摘は投稿されない
 - 新しいレビューの投稿後、同 bot の古い `APPROVED` レビューを dismiss する（投稿「後」なので、実行が失敗しても正当な承認が消えない）
@@ -108,6 +109,7 @@ Client ID / Private key は `actions/create-github-app-token` にだけ渡り、
 - suggestion で書けない修正には、`claude` CLI にそのまま渡せる Fix prompt が `<details>` で添付される
 - 行アンカーが diff に載らない指摘はレビュー本文に移る（1 件の不正アンカーでレビュー全体が失われることはない）。🔴 / 🟡 は「行に付けられなかった指摘」として畳まずに出し、🔵 と `min_severity` 未満の指摘は「その他の観察」に折りたたむ
 - 前回レビュー時の SHA をレビュー本文の不可視マーカーに記録し、push 時は**前回以降の差分に重点**を置く。前回からの interdiff もファイル別に渡される
+- マーカーには PR 自身の差分の fingerprint（hunk の行番号を除いた patch のハッシュ）も記録する。base の取り込みや rebase だけの push で fingerprint が変わらなければ、再レビューせずに run を終える。それでもレビューさせたいときは `/pavo` とコメントする（`/pavo` は差分が同じでも必ずレビューする）
 - 解消が確認できた自分の過去指摘スレッドは自動で resolve される。ただし**そのスレッドのファイルが実際に変更された（またはスレッドが outdated になった）場合のみ** — コードが変わっていないのに「解消済み」と主張しても resolve されない
 - デフォルトブランチの `CLAUDE.md` / `AGENTS.md` がプロンプトに注入され、プロジェクト規約としてレビュー基準に反映される（PR が規約ファイルを書き換えても、その PR 自身のレビュー基準は変わらない）
 - 出力言語は gate が決める。`language: auto` では PR タイトルか description（HTML コメントを除く）にかなか漢字があれば日本語、なければ英語になり、レビュー本文・スレッド返信・Pavo が書く定型文がすべてその言語にそろう。Renovate の PR のように英語で立つ PR も日本語でレビューしたいリポジトリは `language: ja` で固定する
@@ -169,7 +171,6 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 - [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する
 - `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
-- [`metrics.yml`](.github/workflows/metrics.yml) が週次で指摘スレッドの resolve 率・👍/👎 を集計する。各指摘コメントに埋め込まれた不可視マーカー（severity / confidence）を使って、**severity 別・confidence 帯別の較正テーブル**も出す — confidence 閾値や rubric の調整はこの数字を根拠に行う。任意のリポジトリに対しては `REPO=owner/name BOT_NAME='xxx[bot]' node scripts/report-metrics.ts` で手動実行できる
 - workflow が使う action は [`actions.lock`](.github/workflows/actions.lock)（`gh actions-lock` が生成する lockfile）でコミットを固定し、`uses:` はタグで書く。lockfile と workflow の食い違いは CI の verify action が検出する。ラップしている `claude-code-action` も Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
 
 ## セキュリティ

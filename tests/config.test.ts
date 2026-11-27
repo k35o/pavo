@@ -81,5 +81,5 @@ test('resolveLanguage: ja / en の指定は本文に関係なくそのまま使�
 test('severityRank の順序', () => {
   assert.ok(severityRank('critical') > severityRank('warning'));
   assert.ok(severityRank('warning') > severityRank('suggestion'));
-  assert.ok(severityRank('suggestion') > severityRank('praise'));
+  assert.throws(() => severityRank('praise'), /Unknown severity: praise/);
 });

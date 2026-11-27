@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { sameLogin } from '../scripts/lib/bot.ts';
-import { extractLastReviewedSha, summarizeThreads } from '../scripts/collect-context.ts';
+import { diffFingerprint, extractLastReviewMeta, summarizeThreads } from '../scripts/collect-context.ts';
 
 // GraphQL は Bot の login を `[bot]` サフィックスなしで返す（REST は付き）。
 // フィクスチャは実 API に合わせてサフィックスなしにしてある。
@@ -16,27 +16,58 @@ test('sameLogin は GraphQL / REST の表記差を吸収する', () => {
   assert.ok(!sameLogin(null, 'k35o-bot[bot]'));
 });
 
-test('extractLastReviewedSha: サフィックスなし login の bot レビューからマーカーを拾う', () => {
+test('extractLastReviewMeta: サフィックスなし login の bot レビューからマーカーを拾う', () => {
   const reviews = [
     { author: { login: 'k35o-bot' }, body: 'old <!-- pavo:meta {"sha":"aaaaaaa"} -->' },
     { author: { login: 'k8o' }, body: 'human <!-- pavo:meta {"sha":"1234abc"} -->' },
-    { author: { login: 'k35o-bot' }, body: 'new <!-- pavo:meta {"sha":"bbbbbbb"} -->' },
+    { author: { login: 'k35o-bot' }, body: 'new <!-- pavo:meta {"sha":"bbbbbbb","diff":"f00d"} -->' },
   ];
-  assert.equal(extractLastReviewedSha(reviews, BOT_NAME), 'bbbbbbb');
-  assert.equal(extractLastReviewedSha([], BOT_NAME), null);
+  assert.deepEqual(extractLastReviewMeta(reviews, BOT_NAME), { sha: 'bbbbbbb', diff: 'f00d' });
+  assert.equal(extractLastReviewMeta([], BOT_NAME), null);
   assert.equal(
-    extractLastReviewedSha([{ author: { login: 'k35o-bot' }, body: 'no marker' }], BOT_NAME),
+    extractLastReviewMeta([{ author: { login: 'k35o-bot' }, body: 'no marker' }], BOT_NAME),
     null,
   );
 });
 
-test('extractLastReviewedSha: commit 形式でない sha のマーカーは無視して古い正当なマーカーに戻る', () => {
+test('extractLastReviewMeta: diff を記録していない古いマーカーは diff を null にする', () => {
+  const reviews = [{ author: { login: 'k35o-bot' }, body: '<!-- pavo:meta {"sha":"aaaaaaa"} -->' }];
+  assert.deepEqual(extractLastReviewMeta(reviews, BOT_NAME), { sha: 'aaaaaaa', diff: null });
+});
+
+test('extractLastReviewMeta: commit 形式でない sha のマーカーは無視して古い正当なマーカーに戻る', () => {
   // レビュー本文は後から編集できるため、compare API のパスに流れる sha は形式検証する
   const reviews = [
     { author: { login: 'k35o-bot' }, body: '<!-- pavo:meta {"sha":"aaaaaaa"} -->' },
     { author: { login: 'k35o-bot' }, body: '<!-- pavo:meta {"sha":"../../evil"} -->' },
   ];
-  assert.equal(extractLastReviewedSha(reviews, BOT_NAME), 'aaaaaaa');
+  assert.equal(extractLastReviewMeta(reviews, BOT_NAME)?.sha, 'aaaaaaa');
+});
+
+const FILE = {
+  filename: 'src/a.ts',
+  status: 'modified',
+  patch: '@@ -10,3 +10,4 @@ export function a() {\n const x = 1;\n+const y = 2;\n return x;',
+};
+
+test('diffFingerprint: base の変更で hunk の行番号だけがずれても同じ値になる', () => {
+  const rebased = { ...FILE, patch: FILE.patch.replace('@@ -10,3 +10,4 @@', '@@ -42,3 +42,4 @@') };
+  assert.equal(diffFingerprint([FILE]), diffFingerprint([rebased]));
+});
+
+test('diffFingerprint: ファイルの並び順に左右されない', () => {
+  const other = { filename: 'src/b.ts', status: 'added', patch: '@@ -0,0 +1 @@\n+export {};' };
+  assert.equal(diffFingerprint([FILE, other]), diffFingerprint([other, FILE]));
+});
+
+test('diffFingerprint: 追加行の中身が変われば値も変わる', () => {
+  const edited = { ...FILE, patch: FILE.patch.replace('const y = 2;', 'const y = 3;') };
+  assert.notEqual(diffFingerprint([FILE]), diffFingerprint([edited]));
+});
+
+test('diffFingerprint: patch のないファイルは blob の SHA で見分ける', () => {
+  const binary = { filename: 'logo.png', status: 'modified', sha: 'aaa' };
+  assert.notEqual(diffFingerprint([binary]), diffFingerprint([{ ...binary, sha: 'bbb' }]));
 });
 
 test('summarizeThreads: byPavo / isBot がサフィックスなし login でも立ち、切り詰めを記録する', () => {
@@ -78,4 +109,37 @@ test('summarizeThreads: byPavo / isBot がサフィックスなし login でも�
   assert.equal(shaped[1]!.isResolved, true);
   assert.equal(shaped[1]!.line, 9);
   assert.equal(shaped[1]!.comments.length, 1);
+});
+
+const threadWithRoot = (login: string, body: string) => ({
+  isResolved: false,
+  isOutdated: false,
+  path: 'src/a.ts',
+  line: 3,
+  originalLine: 3,
+  comments: { totalCount: 1, nodes: [{ databaseId: 301, author: { login }, body }] },
+});
+
+test('summarizeThreads: Pavo のスレッドは root コメントのマーカーから severity を読み、本文からは消す', () => {
+  const { threads } = summarizeThreads(
+    [threadWithRoot('k35o-bot', '🟡 例外が握りつぶされます\n\n<!-- pavo:finding {"severity":"warning","confidence":90} -->')],
+    BOT_NAME,
+  );
+  assert.equal(threads[0]!.severity, 'warning');
+  assert.equal(threads[0]!.comments[0]!.body, '🟡 例外が握りつぶされます');
+});
+
+test('summarizeThreads: マーカーのないスレッド、廃止した praise、他人のスレッドは severity を持たない', () => {
+  const { threads } = summarizeThreads(
+    [
+      threadWithRoot('k35o-bot', '🔴 マーカー導入前の指摘'),
+      threadWithRoot('k35o-bot', '👍 <!-- pavo:finding {"severity":"praise","confidence":90} -->'),
+      threadWithRoot('k8o', '<!-- pavo:finding {"severity":"critical","confidence":95} -->'),
+    ],
+    BOT_NAME,
+  );
+  assert.deepEqual(
+    threads.map((thread) => thread.severity),
+    [null, null, null],
+  );
 });

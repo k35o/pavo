@@ -5,7 +5,7 @@
 
 import type { Language, PavoConfig, Severity } from './types.ts';
 
-const SEVERITIES: Severity[] = ['praise', 'suggestion', 'warning', 'critical'];
+const SEVERITIES: Severity[] = ['suggestion', 'warning', 'critical'];
 
 export const DEFAULT_IGNORE = [
   '*.lock',
@@ -148,7 +148,7 @@ export function resolveLanguage(setting: PavoConfig['language'], title: string, 
   return JAPANESE.test(visible) ? 'ja' : 'en';
 }
 
-/** Rank for threshold comparison (praise lowest). */
+/** Rank for threshold comparison (suggestion lowest). */
 export function severityRank(severity: string): number {
   const rank = SEVERITIES.indexOf(severity as Severity);
   if (rank === -1) throw new Error(`Unknown severity: ${severity}`);

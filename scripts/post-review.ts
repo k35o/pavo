@@ -4,7 +4,7 @@
 // owns everything that must not be left to an LLM: severity emoji, confidence
 // and ignore filtering, anchor validation against the actual diff, the
 // APPROVE/COMMENT decision, the single POST (with a 422 fallback), dismissing
-// stale APPROVEs *after* the new review exists, thread resolution, and metrics.
+// stale APPROVEs *after* the new review exists, and thread resolution.
 //
 // Required env: REPO, PR_NUMBER, HEAD_SHA, BOT_NAME, CONFIG, STRUCTURED_OUTPUT
 // Optional env: RUN_URL, PAVO_REF, CONTEXT_FILE, VERIFY_OUTPUT, PROMPT_REDUCTIONS
@@ -26,7 +26,14 @@ import { isValidAnchor, parsePatchLines, type PatchLines } from './lib/patch.ts'
 import { resolveThreadsByRootIds } from './lib/threads.ts';
 import { applyVerifyVerdicts, type VerifyVerdict } from './lib/verify.ts';
 import { requireEnv } from './lib/env.ts';
-import type { Language, ReviewConfig, ReviewContext, ReviewFinding, Severity } from './lib/types.ts';
+import type {
+  Language,
+  ReviewConfig,
+  ReviewContext,
+  ReviewFinding,
+  Severity,
+  ThreadSummary,
+} from './lib/types.ts';
 
 const CONFIDENCE_THRESHOLD = 80;
 const REVIEW_BODY_LIMIT = 60000;
@@ -36,7 +43,6 @@ export const SEVERITY_EMOJI: Record<Severity, string> = {
   critical: '🔴',
   warning: '🟡',
   suggestion: '🔵',
-  praise: '👍',
 };
 
 const BLOCKING: ReadonlySet<Severity> = new Set(['critical', 'warning']);
@@ -63,7 +69,7 @@ export function isNoopSuggestion(suggestion: string, currentLines: string[]): bo
 
 /**
  * Render one inline comment body: emoji prefix, optional suggestion fence,
- * and the invisible calibration marker consumed by report-metrics.ts.
+ * and the invisible finding marker that later runs read the severity from.
  */
 export function renderCommentBody(comment: {
   severity: Severity;
@@ -125,14 +131,12 @@ export function partitionComments(
       dropped.push({ comment, reason: 'ignored path' });
       continue;
     }
-    if (comment.severity !== 'praise' && comment.confidence < CONFIDENCE_THRESHOLD) {
+    if (comment.confidence < CONFIDENCE_THRESHOLD) {
       dropped.push({ comment, reason: `confidence ${comment.confidence} < ${CONFIDENCE_THRESHOLD}` });
       continue;
     }
 
-    // Praise is thresholded like a suggestion: quiet configs stay quiet.
-    const rank = comment.severity === 'praise' ? severityRank('suggestion') : severityRank(comment.severity);
-    if (rank < threshold) {
+    if (severityRank(comment.severity) < threshold) {
       demoted.push({ comment, reason: 'below min_severity' });
       continue;
     }
@@ -173,34 +177,68 @@ export function decideEvent(
 }
 
 /**
+ * Pavo's own 🔴/🟡 threads that stay open after this run. A finding raised
+ * in an earlier review keeps blocking APPROVE until the thread is resolved,
+ * even when this run's reviewer did not repeat it.
+ *
+ * @param resolving root ids this run is about to resolve
+ */
+export function countOpenBlockingThreads(threads: ThreadSummary[], resolving: number[]): number {
+  return threads.filter(
+    (thread) =>
+      thread.byPavo &&
+      !thread.isResolved &&
+      thread.severity !== null &&
+      BLOCKING.has(thread.severity) &&
+      !(thread.rootId !== null && resolving.includes(thread.rootId)),
+  ).length;
+}
+
+/**
+ * @param inline findings posted as inline comments, counted in the leading
+ *   tally line
  * @param reductions what build-review-prompt.ts left out of the prompt to fit
  *   claude-code-action's env limit
- * @returns final review body with demoted notes, the reductions and the meta
- *   marker
+ * @returns final review body with the tally, demoted notes, the reductions
+ *   and the meta marker
  */
 export function buildReviewBody({
   summary,
+  inline,
   demoted,
   reductions = [],
+  heldByThreads = 0,
   language,
   meta,
 }: {
   summary: string;
+  inline: ReviewFinding[];
   demoted: { comment: ReviewFinding; reason: string }[];
   reductions?: string[];
+  heldByThreads?: number;
   language: Language;
   meta: Record<string, string>;
 }): string {
   const text = MESSAGES[language];
-  const item = ({ comment, reason }: { comment: ReviewFinding; reason: string }): string =>
-    `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}` +
-    (UNANCHORED_REASONS.has(reason) ? '' : ` _(${reason})_`);
+  const item = ({ comment }: { comment: ReviewFinding }): string =>
+    `- ${SEVERITY_EMOJI[comment.severity]} \`${comment.path}:${comment.line}\` — ${comment.body.replaceAll('\n', ' ')}`;
   const unanchored = demoted.filter(
     ({ comment, reason }) => BLOCKING.has(comment.severity) && UNANCHORED_REASONS.has(reason),
   );
   const notes = demoted.filter((entry) => !unanchored.includes(entry));
 
-  let body = summary.trim();
+  const posted = [
+    ...inline,
+    ...demoted.filter(({ reason }) => UNANCHORED_REASONS.has(reason)).map(({ comment }) => comment),
+  ];
+  const tally = (['critical', 'warning', 'suggestion'] as const)
+    .map((severity) => `${SEVERITY_EMOJI[severity]} ${posted.filter((c) => c.severity === severity).length}`)
+    .join(' · ');
+
+  let body = posted.length > 0 ? `${tally}\n\n${summary.trim()}` : summary.trim();
+  if (heldByThreads > 0) {
+    body += `\n\n${text.heldByThreads(heldByThreads)}`;
+  }
   if (unanchored.length > 0) {
     body += `\n\n${text.unanchoredHeading(unanchored.length)}\n\n${unanchored.map(item).join('\n')}`;
   }
@@ -366,9 +404,22 @@ function main(): void {
   if (selfAuthored) {
     notice(`PR opened by ${botName} itself — APPROVE is unavailable, posting a COMMENT review.`);
   }
-  const event = decideEvent(output.verdict, inline, demoted, config, selfAuthored);
+  const contextFile = process.env.CONTEXT_FILE;
+  const context =
+    contextFile && fs.existsSync(contextFile)
+      ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
+      : null;
+  const { allowed, skipped } = filterResolvableRootIds(
+    (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
+    context,
+  );
+  const openThreads = countOpenBlockingThreads(context?.threads ?? [], allowed);
+  const decided = decideEvent(output.verdict, inline, demoted, config, selfAuthored);
+  const event = openThreads > 0 ? 'COMMENT' : decided;
+  const heldByThreads = decided === 'APPROVE' ? openThreads : 0;
   const meta = {
     sha: headSha,
+    diff: context?.diffFingerprint ?? '',
     instructions: config.instructions,
     model: config.model,
     ref: process.env.PAVO_REF ?? '',
@@ -377,8 +428,10 @@ function main(): void {
   const reductions = JSON.parse(process.env.PROMPT_REDUCTIONS || '[]') as string[];
   const body = buildReviewBody({
     summary: output.summary,
+    inline,
     demoted,
     reductions,
+    heldByThreads,
     language: config.language,
     meta,
   });
@@ -412,8 +465,10 @@ function main(): void {
       event,
       body: buildReviewBody({
         summary: output.summary,
+        inline: [],
         demoted: [...salvaged, ...demoted],
         reductions,
+        heldByThreads,
         language: config.language,
         meta,
       }),
@@ -424,27 +479,18 @@ function main(): void {
   notice(`Posted review ${review.id} (${event}) with ${postedInline} inline comments.`);
 
   dismissStaleApprovals(repo, prNumber, botName, review.id);
-  const contextFile = process.env.CONTEXT_FILE;
-  const context =
-    contextFile && fs.existsSync(contextFile)
-      ? (JSON.parse(fs.readFileSync(contextFile, 'utf8')) as ReviewContext)
-      : null;
-  const { allowed, skipped } = filterResolvableRootIds(
-    (output.resolved_comment_ids ?? []).slice(0, RESOLVE_LIMIT).map(Number),
-    context,
-  );
   for (const entry of skipped) {
     notice(`Skipped resolving thread ${entry.rootId}: ${entry.reason}`);
   }
   const resolvedCount = resolveThreadsByRootIds(repo, prNumber, botName, allowed);
 
-  const counts = { critical: 0, warning: 0, suggestion: 0, praise: 0 };
+  const counts = { critical: 0, warning: 0, suggestion: 0 };
   for (const comment of inline) counts[comment.severity] += 1;
   addStepSummary(
     `### Pavo review\n\n` +
-      `| event | 🔴 | 🟡 | 🔵 | 👍 | demoted | dropped | resolved |\n` +
-      `| --- | --- | --- | --- | --- | --- | --- | --- |\n` +
-      `| ${event} | ${counts.critical} | ${counts.warning} | ${counts.suggestion} | ${counts.praise} | ${demoted.length} | ${dropped.length} | ${resolvedCount} |\n`,
+      `| event | 🔴 | 🟡 | 🔵 | demoted | dropped | resolved |\n` +
+      `| --- | --- | --- | --- | --- | --- | --- |\n` +
+      `| ${event} | ${counts.critical} | ${counts.warning} | ${counts.suggestion} | ${demoted.length} | ${dropped.length} | ${resolvedCount} |\n`,
   );
   if (skipped.length > 0) {
     addStepSummary(

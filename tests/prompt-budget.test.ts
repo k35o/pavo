@@ -69,6 +69,7 @@ const thread = (overrides: Partial<ThreadSummary>): ThreadSummary => ({
   isResolved: false,
   isOutdated: false,
   byPavo: true,
+  severity: 'warning',
   repliesTruncated: false,
   comments: [{ author: 'k8o-bot', isBot: true, body: '指摘' }],
   ...overrides,

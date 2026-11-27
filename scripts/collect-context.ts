@@ -14,7 +14,9 @@
 // cannot afford to list every file.
 //
 // Required env: GH_TOKEN (for gh), REPO, PR_NUMBER, BOT_NAME, HEAD_SHA, OUT_DIR
+// Optional env: ON_DEMAND
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -23,13 +25,14 @@ import { fileURLToPath } from 'node:url';
 import { setOutputs, notice, warning } from './lib/actions.ts';
 import { sameLogin } from './lib/bot.ts';
 import { ghGraphql, ghJson, ghPaginate, ghPaginatePrConnection } from './lib/gh.ts';
-import { stripFindingMarkers } from './lib/markers.ts';
+import { parseFindingMarker, stripFindingMarkers } from './lib/markers.ts';
 import type {
   ChangedFileEntry,
   CompareInfo,
   LinkedIssue,
   ReviewContext,
   ReviewSummaryEntry,
+  Severity,
   ThreadComment,
   ThreadSummary,
 } from './lib/types.ts';
@@ -46,6 +49,8 @@ const LINKED_ISSUE_BODY_LIMIT = 1500;
 const COMMIT_MESSAGE_LIMIT = 20;
 
 export const META_MARKER_PATTERN = /<!-- pavo:meta (\{.*?\}) -->/gs;
+
+const SEVERITIES: ReadonlySet<Severity> = new Set(['critical', 'warning', 'suggestion']);
 
 const truncate = (body: string | null | undefined, limit: number = BODY_LIMIT): string => {
   const text = body ?? '';
@@ -132,9 +137,12 @@ function fetchIssueComments(owner: string, name: string, number: number): any[] 
 /**
  * @param reviews GraphQL review nodes, in submission order
  * @param botName
- * @returns head SHA recorded by the newest Pavo review
+ * @returns head SHA and diff fingerprint recorded by the newest Pavo review
  */
-export function extractLastReviewedSha(reviews: any[], botName: string): string | null {
+export function extractLastReviewMeta(
+  reviews: any[],
+  botName: string,
+): { sha: string; diff: string | null } | null {
   for (const review of [...reviews].reverse()) {
     if (!sameLogin(review.author?.login, botName)) continue;
     // buildReviewBody appends the marker last; the body's prefix is
@@ -145,12 +153,34 @@ export function extractLastReviewedSha(reviews: any[], botName: string): string 
       const meta = JSON.parse(match[1]!);
       // The SHA is interpolated into a compare API path later; accept only
       // something commit-shaped (review bodies are editable after the fact).
-      if (typeof meta.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(meta.sha)) return meta.sha;
+      if (typeof meta.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(meta.sha)) {
+        return { sha: meta.sha, diff: typeof meta.diff === 'string' ? meta.diff : null };
+      }
     } catch {
       // A corrupted marker only costs us the incremental hint.
     }
   }
   return null;
+}
+
+/**
+ * Hash of the PR's own changes, stable across rebases and merges from the
+ * base branch: hunk headers are reduced to `@@` because only their line
+ * numbers move when the base changes elsewhere. A file the API sends without
+ * a patch (binary, too large) is identified by its blob SHA instead.
+ *
+ * @param files REST `pulls/{n}/files` entries
+ */
+export function diffFingerprint(
+  files: { filename: string; status: string; previous_filename?: string; patch?: string; sha?: string }[],
+): string {
+  const hash = createHash('sha256');
+  for (const file of [...files].sort((a, b) => a.filename.localeCompare(b.filename))) {
+    hash.update(`${file.status}\t${file.previous_filename ?? ''}\t${file.filename}\n`);
+    hash.update(file.patch ? file.patch.replace(/^@@ .*$/gm, '@@') : `blob ${file.sha ?? ''}`);
+    hash.update('\n');
+  }
+  return hash.digest('hex');
 }
 
 export function summarizeThreads(
@@ -160,13 +190,16 @@ export function summarizeThreads(
   const shaped: ThreadSummary[] = threads.map((thread) => {
     const comments = thread.comments.nodes;
     const root = comments[0] ?? {};
+    const byPavo = sameLogin(root.author?.login, botName);
+    const severity = byPavo ? parseFindingMarker(root.body)?.severity : undefined;
     return {
       rootId: root.databaseId ?? null,
       path: thread.path,
       line: thread.line ?? thread.originalLine ?? null,
       isResolved: thread.isResolved,
       isOutdated: thread.isOutdated,
-      byPavo: sameLogin(root.author?.login, botName),
+      byPavo,
+      severity: SEVERITIES.has(severity as Severity) ? (severity as Severity) : null,
       repliesTruncated: (thread.comments.totalCount ?? comments.length) > comments.length,
       comments: comments.map((comment: any) => ({
         author: comment.author?.login ?? '?',
@@ -246,6 +279,15 @@ function main(): void {
   const outDir = requireEnv('OUT_DIR');
 
   const rawReviews = fetchReviews(owner, name, number);
+  const files = ghPaginate(`repos/${repo}/pulls/${number}/files`);
+  const fingerprint = diffFingerprint(files);
+  const lastMeta = extractLastReviewMeta(rawReviews, botName);
+  if (process.env.ON_DEMAND !== 'true' && lastMeta?.diff === fingerprint) {
+    notice(`The PR's own diff is unchanged since the review of ${lastMeta.sha}; skipping. Comment /pavo to review anyway.`);
+    setOutputs({ unchanged: 'true' });
+    return;
+  }
+
   const { linkedIssues, commitMessages } = fetchIntentBundle(owner, name, number);
   const { threads, dropped } = summarizeThreads(fetchThreads(owner, name, number), botName);
   const issueComments: ThreadComment[] = fetchIssueComments(owner, name, number).map(
@@ -256,7 +298,7 @@ function main(): void {
     }),
   );
 
-  const lastReviewedSha = extractLastReviewedSha(rawReviews, botName);
+  const lastReviewedSha = lastMeta?.sha ?? null;
   const sameAsLastReview = lastReviewedSha === headSha;
   let changedSinceLastReview: CompareInfo | null = null;
   if (lastReviewedSha && !sameAsLastReview) {
@@ -276,7 +318,7 @@ function main(): void {
   const diffDir = path.join(outDir, 'diff');
   fs.mkdirSync(diffDir, { recursive: true });
   const changedFiles: ChangedFileEntry[] = [];
-  for (const file of ghPaginate(`repos/${repo}/pulls/${number}/files`)) {
+  for (const file of files) {
     changedFiles.push({
       filename: file.filename,
       status: file.status,
@@ -307,6 +349,7 @@ function main(): void {
     changedFiles,
     linkedIssues,
     commitMessages,
+    diffFingerprint: fingerprint,
   };
 
   const contextFile = path.join(outDir, 'context.json');
@@ -316,7 +359,7 @@ function main(): void {
       `${issueComments.length} comments, ${changedFiles.length} changed files, ` +
       `lastReviewedSha=${lastReviewedSha ?? 'none'}`,
   );
-  setOutputs({ context_file: contextFile });
+  setOutputs({ unchanged: 'false', context_file: contextFile });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

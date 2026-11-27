@@ -9,9 +9,6 @@ workflows:
     '.github/workflows/credential-check.yml':
         - 'actions/create-github-app-token@v3.4.0'
         - 'anthropics/claude-code-action@v1.0.283'
-    '.github/workflows/metrics.yml':
-        - 'actions/checkout@v7.0.1'
-        - 'actions/create-github-app-token@v3.4.0'
     '.github/workflows/pavo.yml': []
     '.github/workflows/review.yml':
         - 'actions/checkout@v7.0.1'
