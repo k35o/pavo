@@ -6,7 +6,8 @@
 // prompt from selectBlocking()'s list, and post-review.ts applies the
 // verdicts with applyVerifyVerdicts() — both sides must index the same list.
 
-import type { ReviewFinding } from './types.ts';
+import { MESSAGES } from './messages.ts';
+import type { Language, ReviewFinding } from './types.ts';
 
 export interface VerifyVerdict {
   index: number;
@@ -42,6 +43,7 @@ export function applyVerifyVerdicts(
   },
   rawComments: Record<string, any>[] | null | undefined,
   verdicts: VerifyVerdict[],
+  language: Language,
 ): { refuted: number; uncertain: number } {
   const blocking = selectBlocking(rawComments);
 
@@ -80,7 +82,7 @@ export function applyVerifyVerdicts(
       partition.demoted.push({
         comment: {
           ...comment!,
-          body: `${comment!.body}${note ? ` — 検証セッションの反証: ${note}` : ''}`,
+          body: `${comment!.body}${note ? MESSAGES[language].refutedNote(note) : ''}`,
         },
         reason: 'refuted by verifier',
       });

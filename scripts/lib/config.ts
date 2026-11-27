@@ -3,7 +3,7 @@
 // The repo-side file wins over workflow inputs so per-repo tuning lives next to
 // the reviewed code instead of in caller workflow YAML.
 
-import type { PavoConfig, Severity } from './types.ts';
+import type { Language, PavoConfig, Severity } from './types.ts';
 
 const SEVERITIES: Severity[] = ['praise', 'suggestion', 'warning', 'critical'];
 
@@ -132,6 +132,20 @@ export function resolveConfig(inputs: ConfigInputs, repoConfig: RepoConfig | nul
     throw new Error(`Invalid model: ${config.model}`);
   }
   return config;
+}
+
+const JAPANESE = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
+
+/**
+ * Settle `language: auto` from the PR's own text: any kana or kanji in the
+ * title or description means Japanese, anything else English. HTML comments
+ * are skipped because PR templates keep their (often Japanese) guidance there
+ * even when the author writes in English.
+ */
+export function resolveLanguage(setting: PavoConfig['language'], title: string, body: string): Language {
+  if (setting !== 'auto') return setting;
+  const visible = `${title}\n${body.replace(/<!--[\s\S]*?-->/g, '')}`;
+  return JAPANESE.test(visible) ? 'ja' : 'en';
 }
 
 /** Rank for threshold comparison (praise lowest). */

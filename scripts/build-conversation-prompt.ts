@@ -23,16 +23,12 @@ import {
   sanitizeUntrusted,
 } from './lib/prompt.ts';
 import { requireEnv } from './lib/env.ts';
-import type { PavoConfig } from './lib/types.ts';
+import type { Language, ReviewConfig } from './lib/types.ts';
 
-function languageSection(language: string): string {
-  if (language === 'ja') return '## 出力言語\n\n返答は日本語で書いてください。\n';
-  if (language === 'en') return '## 出力言語\n\n返答は英語で書いてください。\n';
-  return (
-    '## 出力言語\n\n' +
-    '返答は PR タイトル・description の主要言語に合わせて書いてください。\n' +
-    '不明瞭な場合は日本語で書いてください。\n'
-  );
+function languageSection(language: Language): string {
+  return language === 'ja'
+    ? '## 出力言語\n\n返答は日本語で書いてください。\n'
+    : '## 出力言語\n\n返答は英語で書いてください。この指示が日本語でも、返答は英語です。\n';
 }
 
 /** REST review-comment payload — only the fields we touch are accessed. */
@@ -40,7 +36,7 @@ type ReviewComment = any;
 
 export interface ConversationPromptParams {
   actionPath: string;
-  config: PavoConfig;
+  config: ReviewConfig;
   repo: string;
   prNumber: string | number;
   prTitle: string;
@@ -144,7 +140,7 @@ function main(): void {
   const repoContextFile = process.env.REPO_CONTEXT_FILE;
   const prompt = buildConversationPrompt({
     actionPath: requireEnv('ACTION_PATH'),
-    config: JSON.parse(requireEnv('CONFIG')) as PavoConfig,
+    config: JSON.parse(requireEnv('CONFIG')) as ReviewConfig,
     repo,
     prNumber,
     prTitle: process.env.PR_TITLE ?? '',

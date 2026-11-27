@@ -3,7 +3,7 @@
 // JSON goes to the API via stdin (execFile, no shell), which removes the whole
 // class of quoting/command-substitution bugs the old `-f body="..."` template had.
 //
-// Required env: REPO, PR_NUMBER, ROOT_ID, BOT_NAME, STRUCTURED_OUTPUT
+// Required env: REPO, PR_NUMBER, ROOT_ID, BOT_NAME, STRUCTURED_OUTPUT, CONFIG
 
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { addStepSummary, notice, warning } from './lib/actions.ts';
 import { repairLiteralEscapes } from './lib/escapes.ts';
 import { failureDetail, gh, ghJson } from './lib/gh.ts';
+import { MESSAGES } from './lib/messages.ts';
 import { resolveThreadsByRootIds } from './lib/threads.ts';
 import { requireEnv } from './lib/env.ts';
+import type { Language, ReviewConfig } from './lib/types.ts';
 
 const LEARNINGS_PATH = '.github/pavo-learnings.md';
 // A dedicated branch, not the default branch: rulesets like "changes must be
@@ -62,10 +64,11 @@ function ensureLearningsBranch(repo: string): boolean {
  * Requires Contents: Read & write on the GitHub App; degrades gracefully.
  * @returns an error description, or null on success
  */
-function saveLearning(repo: string, prNumber: string, learning: string): string | null {
+function saveLearning(repo: string, prNumber: string, learning: string, language: Language): string | null {
+  const text = MESSAGES[language];
   if (!ensureLearningsBranch(repo)) {
     warning(`Failed to create the ${LEARNINGS_BRANCH} branch (Contents: write required?).`);
-    return `ブランチ \`${LEARNINGS_BRANCH}\` を作成できませんでした（App の \`Contents: Read & write\` 権限を確認してください）`;
+    return text.learningBranchFailed(LEARNINGS_BRANCH);
   }
   const existing = ghJson<{ content?: string; sha?: string }>(
     ['api', `repos/${repo}/contents/${LEARNINGS_PATH}?ref=${LEARNINGS_BRANCH}`],
@@ -90,8 +93,8 @@ function saveLearning(repo: string, prNumber: string, learning: string): string 
   if (!result.ok) {
     warning(`Failed to save learning: ${failureDetail(result)}`);
     return result.stderr.includes('403') || result.stderr.includes('Resource not accessible')
-      ? 'App の `Contents: Read & write` 権限が必要です'
-      : `保存 API がエラーを返しました: ${result.stderr.slice(0, 200).replaceAll('\n', ' ')}`;
+      ? text.learningForbidden
+      : text.learningApiError(result.stderr.slice(0, 200).replaceAll('\n', ' '));
   }
   return null;
 }
@@ -101,6 +104,7 @@ function main(): void {
   const prNumber = requireEnv('PR_NUMBER');
   const rootId = requireEnv('ROOT_ID');
   const botName = requireEnv('BOT_NAME');
+  const { language } = JSON.parse(requireEnv('CONFIG')) as ReviewConfig;
   const output = repairLiteralEscapes(JSON.parse(requireEnv('STRUCTURED_OUTPUT')) as ReplyOutput);
 
   let body = String(output.body ?? '').trim();
@@ -108,13 +112,12 @@ function main(): void {
 
   let learningSaved = false;
   if (output.remember) {
-    const failure = saveLearning(repo, prNumber, String(output.remember));
+    const failure = saveLearning(repo, prNumber, String(output.remember), language);
     learningSaved = failure === null;
-    if (failure) {
-      body += `\n\n> [!NOTE]\n> この方針を learnings に保存しようとしましたが、失敗しました: ${failure}`;
-    } else {
-      body += `\n\n> [!NOTE]\n> \`${LEARNINGS_PATH}\`（\`${LEARNINGS_BRANCH}\` ブランチ）に記録しました。以後のレビューに反映されます。`;
-    }
+    const note = failure
+      ? MESSAGES[language].learningFailed(failure)
+      : MESSAGES[language].learningSaved(LEARNINGS_PATH, LEARNINGS_BRANCH);
+    body += `\n\n> [!NOTE]\n> ${note}`;
   }
 
   ghJson(

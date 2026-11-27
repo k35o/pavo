@@ -7,12 +7,23 @@ const BOT_NAME = 'k8o-bot[bot]';
 const notice = buildOversizeNotice({
   headSha: 'f25ce8ca47a6f68f0390490f1a9e65f46c2bb60c',
   runUrl: 'https://github.com/k35o/k8o/actions/runs/1',
+  language: 'ja',
 });
 
 test('buildOversizeNotice: レビューしなかったことと対象の commit・run を書く', () => {
   assert.ok(notice.includes('Pavo はレビューしませんでした'));
   assert.ok(notice.includes('`f25ce8c`'));
   assert.ok(notice.includes('https://github.com/k35o/k8o/actions/runs/1'));
+});
+
+test('buildOversizeNotice: en では英語で書き、更新用の目印は同じ', () => {
+  const english = buildOversizeNotice({
+    headSha: 'f25ce8ca47a6f68f0390490f1a9e65f46c2bb60c',
+    runUrl: '',
+    language: 'en',
+  });
+  assert.ok(english.startsWith('⚠️ Pavo did not review this PR'));
+  assert.equal(findOversizeNotice([{ id: 5, user: { login: BOT_NAME }, body: english }], BOT_NAME), 5);
 });
 
 test('findOversizeNotice: 自分が前に出した通知を見つけ、push のたびに増やさない', () => {

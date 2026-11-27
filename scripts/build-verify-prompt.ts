@@ -5,7 +5,7 @@
 // refute each one with the same read-only tools. post-review.ts demotes the
 // refuted findings and drops the uncertain ones.
 //
-// Required env: STRUCTURED_OUTPUT, REPO, PR_NUMBER
+// Required env: STRUCTURED_OUTPUT, REPO, PR_NUMBER, CONFIG
 
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -14,11 +14,13 @@ import { setOutputs } from './lib/actions.ts';
 import { sanitizeUntrusted } from './lib/prompt.ts';
 import { selectBlocking } from './lib/verify.ts';
 import { requireEnv } from './lib/env.ts';
+import type { Language, ReviewConfig } from './lib/types.ts';
 
 export function buildVerifyPrompt(
   blocking: Record<string, any>[],
   repo: string,
   prNumber: string,
+  language: Language,
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -51,7 +53,7 @@ export function buildVerifyPrompt(
       '- `index`: 上の指摘の index\n' +
       '- `verdict`: 反証に成功したら `refuted`、コードを読んで指摘が正しいと確認できたら `confirmed`、' +
       'どちらとも判断できなければ `uncertain`\n' +
-      '- `note`: 判断根拠の 1〜2 文。`refuted` のときは必須（何がどこで保証されているか）\n\n' +
+      `- \`note\`: 判断根拠の 1〜2 文を${language === 'ja' ? '日本語' : '英語'}で書く。\`refuted\` のときは必須（何がどこで保証されているか）\n\n` +
       '「反証できなかった」だけでは `confirmed` にしないでください（正しさを確認できた場合のみ）。' +
       '迷ったら `uncertain` にします。\n' +
       'JSON 以外のテキスト（挨拶・説明）を最終出力に含めないでください。\n',
@@ -68,7 +70,12 @@ function main(): void {
   }
   setOutputs({
     skip: 'false',
-    prompt: buildVerifyPrompt(blocking, requireEnv('REPO'), requireEnv('PR_NUMBER')),
+    prompt: buildVerifyPrompt(
+      blocking,
+      requireEnv('REPO'),
+      requireEnv('PR_NUMBER'),
+      (JSON.parse(requireEnv('CONFIG')) as ReviewConfig).language,
+    ),
   });
 }
 

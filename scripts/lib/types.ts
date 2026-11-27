@@ -4,16 +4,25 @@
 
 export type Severity = 'critical' | 'warning' | 'suggestion' | 'praise';
 
+export type Language = 'ja' | 'en';
+
 export interface PavoConfig {
   instructions: string;
   extraPrompt: string;
-  language: 'auto' | 'ja' | 'en';
+  language: 'auto' | Language;
   approve: boolean;
   minSeverity: Exclude<Severity, 'praise'>;
   model: string;
   reviewDrafts: boolean;
   ignore: string[];
 }
+
+/**
+ * The configuration every script after gate.ts reads: `auto` is already
+ * resolved against the PR, so the prompts and the fixed text Pavo posts agree
+ * on one language.
+ */
+export type ReviewConfig = Omit<PavoConfig, 'language'> & { language: Language };
 
 /** One element of the structured review output's `comments[]`. */
 export interface ReviewFinding {

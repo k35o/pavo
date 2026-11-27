@@ -256,6 +256,7 @@ jobs:
           PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
           HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
           BOT_NAME: ${{ steps.bot.outputs.name }}
+          CONFIG: ${{ steps.gate.outputs.config }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -285,6 +286,7 @@ jobs:
           STRUCTURED_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+          CONFIG: ${{ steps.gate.outputs.config }}
         run: |
           set -euo pipefail
           node "${RUNNER_TEMP}/pavo-src/scripts/build-verify-prompt.ts"
@@ -359,6 +361,7 @@ jobs:
           ROOT_ID: ${{ steps.gate.outputs.root_id }}
           BOT_NAME: ${{ steps.bot.outputs.name }}
           STRUCTURED_OUTPUT: ${{ steps.claude-convo.outputs.structured_output }}
+          CONFIG: ${{ steps.gate.outputs.config }}
         run: |
           set -euo pipefail
           node "${RUNNER_TEMP}/pavo-src/scripts/post-reply.ts"

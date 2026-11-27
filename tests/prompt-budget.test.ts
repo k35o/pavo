@@ -92,7 +92,7 @@ const context = (overrides: Partial<ReviewContext> = {}): ReviewContext => ({
 const params = (overrides: Partial<BuildReviewPromptParams> = {}): BuildReviewPromptParams => ({
   actionPath: ROOT,
   workspace: null,
-  config: { ...resolveConfig({}, null), instructions: 'default,nextjs,typescript' },
+  config: { ...resolveConfig({}, null), language: 'ja', instructions: 'default,nextjs,typescript' },
   repo: 'k35o/k8o',
   prNumber: '2318',
   prTitle: 'feat(main): k8o.me を Next から k8ordo に切り替える',

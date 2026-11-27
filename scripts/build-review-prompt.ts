@@ -36,7 +36,7 @@ import {
   sanitizeUntrusted,
 } from './lib/prompt.ts';
 import { requireEnv } from './lib/env.ts';
-import type { ChangedFileEntry, PavoConfig, ReviewContext } from './lib/types.ts';
+import type { ChangedFileEntry, Language, ReviewConfig, ReviewContext } from './lib/types.ts';
 
 // claude-code-action has no file input: its run step receives the prompt as
 // the PROMPT env var and again inside ALL_INPUTS (toJson of every input), and
@@ -55,15 +55,10 @@ const isRemoved = (file: ChangedFileEntry): boolean => file.status === 'removed'
 const isPureRename = (file: ChangedFileEntry): boolean =>
   file.status === 'renamed' && file.additions + file.deletions === 0;
 
-function languageSection(language: PavoConfig['language']): string {
-  if (language === 'ja') return '## 出力言語\n\nすべての出力は日本語で書いてください。\n';
-  if (language === 'en') return '## 出力言語\n\nすべての出力は英語で書いてください。\n';
-  return (
-    '## 出力言語\n\n' +
-    'レビューコメントは PR タイトル・description の主要言語に合わせて書いてください。\n' +
-    '英語なら英語で、日本語なら日本語で書きます。\n' +
-    'description もタイトルも言語が不明瞭な場合は日本語で書いてください。\n'
-  );
+function languageSection(language: Language): string {
+  return language === 'ja'
+    ? '## 出力言語\n\n`summary` と `comments[].body` は日本語で書いてください。\n'
+    : '## 出力言語\n\n`summary` と `comments[].body` は英語で書いてください。この指示が日本語でも、出力は英語です。\n';
 }
 
 function intentSection(context: ReviewContext | null): string | null {
@@ -247,7 +242,7 @@ function diffFilesSection(context: ReviewContext | null, listing: FileListing): 
 export interface BuildReviewPromptParams {
   actionPath: string;
   workspace: string | null;
-  config: PavoConfig;
+  config: ReviewConfig;
   repo: string;
   prNumber: string;
   prTitle: string;
@@ -386,15 +381,37 @@ function shapeConversation(
 // Cheapest loss first. Each stage changes one thing from the stage before, so
 // a stage that leaves the prompt unchanged had nothing to drop and is not
 // reported.
-const SHRINK_STAGES: { listing: FileListing; conversation: ConversationLevel; reduction: string }[] = [
+const SHRINK_STAGES: {
+  listing: FileListing;
+  conversation: ConversationLevel;
+  reduction: Record<Language, string>;
+}[] = [
   {
     listing: 'compact',
     conversation: 'full',
-    reduction: '削除されたファイルと内容の変わらない rename を件数だけにまとめた',
+    reduction: {
+      ja: '削除されたファイルと内容の変わらない rename を件数だけにまとめた',
+      en: 'counted removed files and unchanged renames instead of listing them',
+    },
   },
-  { listing: 'compact', conversation: 'slim', reduction: '解決済みスレッドとコメント履歴を省いた' },
-  { listing: 'head', conversation: 'slim', reduction: `変更ファイルの一覧を先頭 ${FILE_LIST_HEAD} 件に絞った` },
-  { listing: 'head', conversation: 'none', reduction: '既存の会話を省いた' },
+  {
+    listing: 'compact',
+    conversation: 'slim',
+    reduction: { ja: '解決済みスレッドとコメント履歴を省いた', en: 'left out resolved threads and comment history' },
+  },
+  {
+    listing: 'head',
+    conversation: 'slim',
+    reduction: {
+      ja: `変更ファイルの一覧を先頭 ${FILE_LIST_HEAD} 件に絞った`,
+      en: `listed only the first ${FILE_LIST_HEAD} changed files`,
+    },
+  },
+  {
+    listing: 'head',
+    conversation: 'none',
+    reduction: { ja: '既存の会話を省いた', en: 'left out the existing conversation' },
+  },
 ];
 
 export interface BudgetedPrompt {
@@ -416,7 +433,7 @@ export function buildPromptWithinBudget(
       { ...params, context: shapeConversation(params.context, stage.conversation) },
       stage.listing,
     );
-    if (smaller !== prompt) reductions.push(stage.reduction);
+    if (smaller !== prompt) reductions.push(stage.reduction[params.config.language]);
     prompt = smaller;
   }
   return { prompt: promptBytes(prompt) <= budget ? prompt : null, reductions };
@@ -427,7 +444,7 @@ function main(): void {
   const params: BuildReviewPromptParams = {
     actionPath: requireEnv('ACTION_PATH'),
     workspace: process.env.GITHUB_WORKSPACE || null,
-    config: JSON.parse(requireEnv('CONFIG')) as PavoConfig,
+    config: JSON.parse(requireEnv('CONFIG')) as ReviewConfig,
     repo: requireEnv('REPO'),
     prNumber: requireEnv('PR_NUMBER'),
     prTitle: process.env.PR_TITLE ?? '',

@@ -5,6 +5,7 @@ import {
   DEFAULT_IGNORE,
   parseRepoConfig,
   resolveConfig,
+  resolveLanguage,
   severityRank,
 } from '../scripts/lib/config.ts';
 
@@ -54,6 +55,27 @@ test('parseRepoConfig: オブジェクト以外の JSON と壊れた JSON は th
   assert.throws(() => parseRepoConfig('"approve"'), /must be a JSON object/);
   assert.throws(() => parseRepoConfig('null'), /must be a JSON object/);
   assert.throws(() => parseRepoConfig('{broken'), /not valid JSON/);
+});
+
+test('resolveLanguage: auto はタイトルか description にかなか漢字があれば ja', () => {
+  assert.equal(resolveLanguage('auto', 'feat: add x', 'x を追加する'), 'ja');
+  assert.equal(resolveLanguage('auto', 'fix: 型を直す', ''), 'ja');
+  assert.equal(resolveLanguage('auto', 'feat: 追加', 'Adds x.'), 'ja');
+});
+
+test('resolveLanguage: auto でかなも漢字もなければ en', () => {
+  assert.equal(resolveLanguage('auto', 'chore(deps): update storybook', 'This PR updates storybook.'), 'en');
+  assert.equal(resolveLanguage('auto', '', ''), 'en');
+});
+
+test('resolveLanguage: PR テンプレートの HTML コメントにある日本語は数えない', () => {
+  const body = '<!-- 変更の概要を書いてください -->\nAdds a mock for Date.now().';
+  assert.equal(resolveLanguage('auto', 'feat: mock Date.now', body), 'en');
+});
+
+test('resolveLanguage: ja / en の指定は本文に関係なくそのまま使う', () => {
+  assert.equal(resolveLanguage('ja', 'chore(deps): update storybook', ''), 'ja');
+  assert.equal(resolveLanguage('en', 'feat: 追加', 'x を追加する'), 'en');
 });
 
 test('severityRank の順序', () => {
