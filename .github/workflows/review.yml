@@ -68,7 +68,19 @@ jobs:
     # Cross-repository (true fork) PRs cannot see secrets, so the App token
     # step would fail anyway. head.repo.fork is NOT this check: it is true for
     # every in-repo PR on a repository that is itself a fork.
-    if: ${{ github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository }}
+    #
+    # gate.ts checks author_association too, but only after the App token
+    # exists; repeating it here means a comment from someone without write
+    # access never mints a token or runs a step at all. Bot replies in review
+    # threads pass on to gate.ts, which holds them to allow_bots.
+    if: >-
+      ${{
+        (github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository) &&
+        (github.event_name != 'issue_comment' ||
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) &&
+        (github.event_name != 'pull_request_review_comment' || github.event.sender.type == 'Bot' ||
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Only checkout needs the workflow token; every GitHub write (review,
@@ -103,11 +115,18 @@ jobs:
       # The PR checkout below empties the workspace.
       - run: mv .pavo "${RUNNER_TEMP}/pavo-src"
 
+      # The same App often runs Renovate or other automation with far broader
+      # installation permissions, so the token is cut down to what Pavo uses.
+      # Only a review-thread reply can save a learning (a commit to the
+      # pavo/learnings branch), so only that event gets contents: write.
       - id: app-token
         uses: actions/create-github-app-token@v3.4.0
         with:
           client-id: ${{ secrets.K35O_BOT_CLIENT_ID }}
           private-key: ${{ secrets.K35O_BOT_PRIVATE_KEY }}
+          permission-contents: ${{ github.event_name == 'pull_request_review_comment' && 'write' || 'read' }}
+          permission-pull-requests: write
+          permission-issues: read
 
       # All trigger/config logic lives in gate.ts so it is unit-testable.
       # Repo-side .github/pavo.json (if any) is merged over the inputs here.

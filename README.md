@@ -19,20 +19,27 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review_comment:
     types: [created]
-  issue_comment:
+  issue_comment: # zizmor: ignore[dangerous-triggers]
     types: [created]
+
+permissions: {}
 
 jobs:
   pavo:
     # /pavo コマンド以外の通常コメントで runner を起こさないための事前フィルタ
     if: ${{ github.event_name != 'issue_comment' || startsWith(github.event.comment.body, '/pavo') }}
     uses: k35o/pavo/.github/workflows/review.yml@main
+    permissions:
+      contents: read
     with:
       instructions: default,nextjs
-    secrets: inherit
+    secrets:
+      K35O_BOT_CLIENT_ID: ${{ secrets.K35O_BOT_CLIENT_ID }}
+      K35O_BOT_PRIVATE_KEY: ${{ secrets.K35O_BOT_PRIVATE_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-`secrets: inherit` で org secrets（`K35O_BOT_CLIENT_ID` / `K35O_BOT_PRIVATE_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`）がそのまま渡る。concurrency・fork スキップ・timeout・App token 発行は reusable workflow 側に集約されているので、caller の改善は Pavo 側の 1 コミットで全リポジトリに届く。
+Pavo が使う 3 つの secret だけを渡し、caller の他の secret は reusable workflow に届かない。workflow token に要るのは `contents: read` だけで、GitHub への書き込みはすべて App token で行う。`issue_comment` は `/pavo` コマンドのために必要で、review.yml が OWNER / MEMBER / COLLABORATOR 以外のコメントを token の発行前に落とす（zizmor の `dangerous-triggers` を ignore しているのはこのため）。concurrency・fork スキップ・timeout・App token 発行は reusable workflow 側に集約されているので、caller の改善は Pavo 側の 1 コミットで全リポジトリに届く。
 
 `@main` のままだと最新を追従する。固定したい場合は `@<commit-sha>` で 40 文字 SHA を指定する（Renovate 等が自動更新できる形）。review.yml は Pavo のスクリプトを自分と同じコミット（`job.workflow_sha`）から取り出すので、この 1 つの pin で実行される Pavo 全体が決まる。
 
@@ -46,7 +53,7 @@ caller の repo で Actions の Require lockfile ポリシーを有効にして�
 
 | 項目 | 設定 |
 | --- | --- |
-| Repository permissions | `Pull requests: Read & write`, `Contents: Read`（learnings 保存を使うなら `Read & write`）, `Issues: Read & write`, `Metadata: Read` |
+| Repository permissions | `Pull requests: Read & write`, `Contents: Read & write`（スレッド返信からの learnings 保存に使う）, `Issues: Read`, `Metadata: Read` |
 | Webhook | 「Active」のチェックを外す（不要）。イベントの受け取りは caller workflow の `on:` が担うため、App の event subscription は使わない |
 
 ### 2. caller repo（または org）に secret を登録
@@ -57,7 +64,7 @@ caller の repo で Actions の Require lockfile ポリシーを有効にして�
 | `K35O_BOT_CLIENT_ID` | GitHub App の Client ID (`Iv23...`) |
 | `K35O_BOT_PRIVATE_KEY` | GitHub App の Private key (PEM 全体) |
 
-Client ID / Private key は `actions/create-github-app-token` にだけ渡り、Pavo のスクリプトはそれが発行したインストールトークンと App slug だけを受け取る。
+Client ID / Private key は `actions/create-github-app-token` にだけ渡り、Pavo のスクリプトはそれが発行したインストールトークンと App slug だけを受け取る。トークンは App に付けた権限のうち `Pull requests: write`・`Issues: read`・`Contents: read` に絞って発行し、`Contents: write` はスレッド返信のイベントでだけ要求する。同じ App で Renovate などを動かしていて App 自体の権限が広くても、Pavo の実行にはこの範囲しか渡らない。
 
 ## トリガー
 
@@ -168,7 +175,7 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 ## バージョン管理と CI
 
 - タグやリリース運用は持たず、ブランチか commit SHA で参照する。Renovate は SHA pin を `# main` の digest として追従する
-- [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する
+- [`ci.yml`](.github/workflows/ci.yml) が型チェック（`tsc --noEmit`）と、index.json の整合・全観点組み合わせのプロンプト生成・gate / 投稿ロジックの単体テスト（`node --test`）を PR ごとに検証する。Node は `mise.toml` で固定したバージョンを mise で入れて使う。同じ PR で [zizmor](https://docs.zizmor.sh/) が workflow を監査し、指摘があれば落ちる（設計上必要なものは対象行の `# zizmor: ignore[...]` で除外し、理由をコメントに書く）
 - `scripts/*.ts` は TypeScript のまま Node の type stripping（Node 22.18+ で標準有効）で直接実行される。ビルドステップ・ランタイム依存はない（`typescript` は型チェック用の devDependency のみ）
 - [`credential-check.yml`](.github/workflows/credential-check.yml) が月次で App 鍵と OAuth token の疎通を確認し、失敗すると issue を立てる（トークン期限切れによる全リポジトリ同時停止を事前に検知）
 - workflow が使う action は [`actions.lock`](.github/workflows/actions.lock)（`gh actions-lock` が生成する lockfile）でコミットを固定し、`uses:` はタグで書く。lockfile と workflow の食い違いは CI の verify action が検出する。ラップしている `claude-code-action` も Renovate で追従する（upstream はインジェクションサニタイザ等の防御を頻繁に更新するため、放置しない）
@@ -217,6 +224,6 @@ caller workflow を触らずにリポジトリ側で調整したい場合、以�
 | レビューが来ない（run が赤） | PR に失敗通知コメントが付く。run URL のログを確認 |
 | `--json-schema was provided but Claude did not return structured_output` | Claude 実行自体の失敗。直後の失敗診断ステップの `::error::` / step summary に result の実エラー本文が出る。cost $0 かつ 1 turn なら `CLAUDE_CODE_OAUTH_TOKEN` の失効・無効を疑う |
 | `Unknown instruction: xxx` | `instructions` の typo。既知の観点名はエラーメッセージに列挙される |
-| learnings が保存されない | App の `Contents` 権限が Read のみ。`Read & write` に変更する |
+| スレッドに返信しても Pavo が応答しない（app-token ステップが `permissions requested are not granted` で失敗） | App の `Contents` 権限が Read のみ。返信のイベントでは `Contents: write` のトークンを要求するので、`Read & write` に変更する |
 | 「レビューに渡す情報が大きすぎるため、Pavo はレビューしませんでした」とコメントが付く | 変更ファイルの一覧と会話を縮めても、プロンプトが予算に収まらなかった。PR を分けるか description を短くする。Actions ログの `::warning::` に縮めた内容が出る |
 | 全リポジトリで一斉に止めたい | Actions variable `PAVO_DISABLED=true` |
