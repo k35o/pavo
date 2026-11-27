@@ -93,7 +93,7 @@ Client ID / Private key は `actions/create-github-app-token` にだけ渡り、
 | [`frontend`](instructions/frontend.md) | WCAG 2.2 の a11y・dialog と popover・フォーム・Core Web Vitals（LCP / INP / CLS）・Baseline | — | — |
 | [`react`](instructions/react.md) | スキルの当てはめ方（React のバージョンと Compiler の確認）と指摘の重さ | `frontend` | `react` |
 | [`nextjs`](instructions/nextjs.md) | Next.js 16 の App Router・Server / Client 境界・Cache Components・Server Functions・proxy | `frontend` + `react` | — |
-| [`typescript`](instructions/typescript.md) | 型の抜け穴・ユニオン網羅性・erasable syntax・TypeScript 7 で消えたオプション・`using` | — | — |
+| [`typescript`](instructions/typescript.md) | 型の抜け穴・ユニオン網羅性・erasable syntax・TypeScript 6 / 7 で消えたオプションと変わった既定値・7 への移行・`using` | — | — |
 | [`node`](instructions/node.md) | ESM/CJS と `require(esm)`・type stripping・async・stream・child_process・標準 API・pnpm のサプライチェーン設定 | `typescript` | — |
 | [`github-actions`](instructions/github-actions.md) | script injection・permissions と App token・`actions.lock` と SHA ピン・シェル堅牢性 | — | — |
 | [`testing`](instructions/testing.md) | 振る舞いの検証・リテラルの期待値・テストダブル・安定性・過不足 | — | `testing` |
