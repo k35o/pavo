@@ -5,8 +5,8 @@ React (>= 19) のコードを、このプロンプトに添付した `practices:
 
 ## 進め方
 
-- 先に `package.json` の `react` のバージョンを確認する。そのバージョンにない API（19.2 の `useEffectEvent` や `<Activity>` など）を前提にした指摘はしない
-- `useMemo` / `useCallback` / `memo` の追加や削除を指摘する前に、React Compiler が有効か（`babel-plugin-react-compiler`、Next.js の `reactCompiler`、Vite のプラグイン設定）を確認する
+- 先に `package.json` の `react` のバージョンを確認する。そのバージョンにない API（19.2 の `useEffectEvent` や `<Activity>`、19.3 の `<ViewTransition>` や `<Fragment ref>` など）を前提にした指摘はしない
+- `useMemo` / `useCallback` / `memo` の追加や削除を指摘する前に、React Compiler が有効か（`babel-plugin-react-compiler`、Next.js 16 の `reactCompiler`（15 は `experimental.reactCompiler`）、`@vitejs/plugin-react` 6 の `reactCompilerPreset()`）を確認する
 - スキルの「書かないもの」に当たるコードが diff で追加されていたら指摘する。diff が触っていない既存コードの同種のパターンは指摘しない
 
 ## 指摘の重さの目安
