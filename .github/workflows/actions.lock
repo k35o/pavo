@@ -10,12 +10,12 @@ workflows:
         - 'zizmorcore/zizmor-action@v0.8.1'
     '.github/workflows/credential-check.yml':
         - 'actions/create-github-app-token@v3.4.0'
-        - 'anthropics/claude-code-action@v1.0.284'
+        - 'anthropics/claude-code-action@v1.0.286'
     '.github/workflows/pavo.yml': []
     '.github/workflows/review.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/create-github-app-token@v3.4.0'
-        - 'anthropics/claude-code-action@v1.0.284'
+        - 'anthropics/claude-code-action@v1.0.286'
 dependencies:
     'actions/checkout@v7.0.1':
         ref: 'v7.0.1'
@@ -27,9 +27,9 @@ dependencies:
         commit: 'sha1-f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc'
         owner_id: 44036562
         repo_id: 642580244
-    'anthropics/claude-code-action@v1.0.284':
-        ref: 'v1.0.284'
-        commit: 'sha1-c84e279f859e2591391e95bd309286eb111c345f'
+    'anthropics/claude-code-action@v1.0.286':
+        ref: 'v1.0.286'
+        commit: 'sha1-acfe7992852970efb4fee683d63d628e3e52df67'
         owner_id: 76263028
         repo_id: 986421638
         uses:
